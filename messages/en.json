@@ -1,0 +1,171 @@
+{
+  "common": {
+    "appName": "Case Law Search AI",
+    "appTagline": "Find Korean Supreme Court precedents by fact pattern",
+    "search": "Search",
+    "searching": "Searching...",
+    "loading": "Loading...",
+    "error": "Error",
+    "retry": "Retry",
+    "clear": "Clear",
+    "save": "Save",
+    "export": "Export",
+    "compare": "Compare",
+    "language": "Language",
+    "korean": "한국어",
+    "english": "English"
+  },
+  "home": {
+    "heroTitle": "Describe the facts. We'll find precedent you can actually cite.",
+    "heroSubtitle": "Enter the factual narrative of your case (not keywords). The AI agent finds the most similar Korean Supreme Court precedents and checks whether they would survive citation scrutiny.",
+    "cta": "Enter case facts"
+  },
+  "intake": {
+    "title": "Case Facts",
+    "narrativeLabel": "Factual narrative (parties, events, claim, damages, dates)",
+    "narrativePlaceholder": "Example) In March 2024, the plaintiff entered into an office lease agreement with the defendant and paid a security deposit of KRW 50 million. After the lease ended, the defendant refused to return the deposit without legitimate cause...",
+    "narrativeHelp": "The more specific you are, the more accurate the precedent retrieval.",
+    "analyze": "Analyze & Search",
+    "askClarification": "Ask follow-ups",
+    "clarifyHeader": "A few questions to narrow the search",
+    "skipClarification": "Skip and search"
+  },
+  "elements": {
+    "title": "Extracted Legal Elements",
+    "caseNature": "Case nature",
+    "parties": "Parties",
+    "plaintiff": "Plaintiff",
+    "defendant": "Defendant",
+    "claimCause": "Cause of claim (청구원인)",
+    "legalRelationship": "Legal relationship (법률관계)",
+    "partyStatus": "Party status (당사자 지위)",
+    "coreIssue": "Core issue (쟁점)",
+    "damageType": "Damage type (손해 종류)",
+    "applicableStatutes": "Applicable statutes",
+    "keyFacts": "Load-bearing facts",
+    "missingInfo": "Missing information"
+  },
+  "results": {
+    "title": "Results",
+    "noResults": "No similar precedents found. Add more specific facts and try again.",
+    "citable": "Citable",
+    "notCitable": "Not citable",
+    "verified": "Source verified",
+    "unverified": "Source unverified",
+    "viewSource": "View source",
+    "whyMatches": "Why it matches",
+    "matchingFacts": "Matching facts",
+    "distinguishingFacts": "Distinguishing facts (caution)",
+    "embeddingScore": "Semantic similarity",
+    "elementScore": "Element overlap",
+    "finalScore": "Final score",
+    "caseNumber": "Case number",
+    "court": "Court",
+    "decisionDate": "Decision date",
+    "holding": "Holding (판시사항)",
+    "summary": "Summary (판결요지)"
+  },
+  "dashboard": {
+    "tabs": {
+      "summary": "Summary",
+      "detailed": "Detailed",
+      "why": "Why?"
+    },
+    "empty": {
+      "title": "No case yet",
+      "body": "Enter a case below and the analysis will appear here."
+    },
+    "loading": "Loading analysis...",
+    "error": {
+      "title": "Couldn't load analysis",
+      "retry": "Retry"
+    },
+    "summary": {
+      "title": "Case summary",
+      "overview": "Overview",
+      "keyIssue": "Key issue (쟁점)",
+      "parties": "Parties (당사자)",
+      "claim": "Claim (청구원인)",
+      "statutes": "Applicable statutes"
+    },
+    "detailed": {
+      "title": "Detailed analysis",
+      "factPattern": "Fact pattern (formal)",
+      "legalAnalysis": "Legal analysis (쟁점 · 법률관계)",
+      "applicableStatutes": "Applicable statutes",
+      "statuteCitation": "Statute",
+      "statuteWhy": "Why it applies",
+      "strategicNotes": "Strategic notes",
+      "openQuestions": "Open questions"
+    },
+    "why": {
+      "title": "Why this precedent",
+      "noMatches": "No precedents to show yet.",
+      "reasoning": "Reasoning",
+      "pairedMappings": "Fact-to-fact mapping",
+      "userFactCol": "Your fact",
+      "precedentFactCol": "Precedent fact",
+      "sameBecauseCol": "Same because",
+      "citationStrategy": "Citation strategy",
+      "distinguishingRisk": "Distinguishing risk",
+      "expand": "Expand",
+      "collapse": "Collapse"
+    }
+  },
+  "shell": {
+    "emptyDashboard": "Select a case from the sidebar or create a new one to start.",
+    "noAnalysisYet": "Enter the case facts below and hit send — the analysis will appear here."
+  },
+  "sidebar": {
+    "newCase": "+ New case",
+    "newFolder": "New folder",
+    "addFolder": "Add folder",
+    "addCase": "Add case file",
+    "rename": "Rename",
+    "delete": "Delete",
+    "emptyState": "No cases yet. Hit \"+ New case\" below to start.",
+    "confirmDeleteFolder": "Delete this folder and all cases inside it?",
+    "confirmDeleteCase": "Delete this case?",
+    "inbox": "Inbox",
+    "newFolderDefault": "New folder",
+    "untitledCase": "Untitled case"
+  },
+  "chat": {
+    "placeholder": "Describe the case facts in detail. Include parties, sequence of events, cause of claim, damages, and dates.",
+    "send": "Send",
+    "attachFile": "Attach file",
+    "startRecording": "Start voice input",
+    "stopRecording": "Stop voice input",
+    "dropFiles": "Drop files to attach",
+    "extracting": "Extracting legal elements...",
+    "untitledCase": "Untitled case"
+  },
+  "chips": {
+    "summarize": {
+      "label": "Case summary",
+      "prompt": "Please summarize the following case: "
+    },
+    "analyze": {
+      "label": "Detailed analysis",
+      "prompt": "Please analyze the legal issues in the following case in depth: "
+    },
+    "precedents": {
+      "label": "Citable precedents",
+      "prompt": "Please find Korean Supreme Court precedents that could be cited for this case: "
+    },
+    "counter": {
+      "label": "Opposing arguments",
+      "prompt": "Please analyze the counter-arguments the opposing party is likely to raise in this case: "
+    },
+    "statutes": {
+      "label": "Applicable statutes",
+      "prompt": "Please analyze the statutes (and specific articles) that may apply to this case: "
+    }
+  },
+  "header": {
+    "newCase": "New case",
+    "renameCase": "Rename case",
+    "toggleLocale": "Toggle language",
+    "settings": "Settings"
+  }
+}

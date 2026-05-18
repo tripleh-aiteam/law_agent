@@ -1,0 +1,171 @@
+{
+  "common": {
+    "appName": "판례 검색 AI",
+    "appTagline": "사실관계로 찾는 대법원 판례",
+    "search": "검색",
+    "searching": "검색 중...",
+    "loading": "불러오는 중...",
+    "error": "오류",
+    "retry": "다시 시도",
+    "clear": "지우기",
+    "save": "저장",
+    "export": "내보내기",
+    "compare": "비교",
+    "language": "언어",
+    "korean": "한국어",
+    "english": "English"
+  },
+  "home": {
+    "heroTitle": "사실관계만 입력하세요. 인용 가능한 판례를 찾아드립니다.",
+    "heroSubtitle": "키워드가 아닌 사건의 사실관계를 문장으로 입력하면, AI agent가 가장 유사한 대법원 판례를 찾아 인용 가능 여부까지 검토합니다.",
+    "cta": "사실관계 입력하기"
+  },
+  "intake": {
+    "title": "사실관계 입력",
+    "narrativeLabel": "사건의 사실관계 (당사자, 경위, 청구원인, 손해, 일시 등)",
+    "narrativePlaceholder": "예시) 원고는 2024년 3월 피고와 사이에 사무실 임대차계약을 체결하고 보증금 5천만원을 지급하였습니다. 피고는 계약 종료 후 정당한 사유 없이 보증금 반환을 거부하고 있으며...",
+    "narrativeHelp": "최대한 구체적으로 작성할수록 정확한 판례가 검색됩니다.",
+    "analyze": "분석 및 검색",
+    "askClarification": "추가 질문",
+    "clarifyHeader": "사건의 정확한 검색을 위해 추가 정보가 필요합니다",
+    "skipClarification": "건너뛰고 검색"
+  },
+  "elements": {
+    "title": "추출된 법적 요소",
+    "caseNature": "사건의 성질",
+    "parties": "당사자",
+    "plaintiff": "원고/신청인",
+    "defendant": "피고/피신청인",
+    "claimCause": "청구원인",
+    "legalRelationship": "법률관계",
+    "partyStatus": "당사자 지위",
+    "coreIssue": "쟁점",
+    "damageType": "손해 종류",
+    "applicableStatutes": "적용 법령",
+    "keyFacts": "주요 사실",
+    "missingInfo": "확인 필요 사항"
+  },
+  "results": {
+    "title": "검색 결과",
+    "noResults": "유사한 판례를 찾지 못했습니다. 사실관계를 더 구체적으로 입력해 주세요.",
+    "citable": "인용 가능",
+    "notCitable": "인용 부적합",
+    "verified": "출처 확인됨",
+    "unverified": "출처 미확인",
+    "viewSource": "원문 보기",
+    "whyMatches": "왜 유사한가",
+    "matchingFacts": "공통 사실",
+    "distinguishingFacts": "구별 사실 (주의)",
+    "embeddingScore": "의미 유사도",
+    "elementScore": "요소 일치도",
+    "finalScore": "최종 점수",
+    "caseNumber": "사건번호",
+    "court": "법원",
+    "decisionDate": "선고일",
+    "holding": "판시사항",
+    "summary": "판결요지"
+  },
+  "dashboard": {
+    "tabs": {
+      "summary": "요약",
+      "detailed": "상세",
+      "why": "왜?"
+    },
+    "empty": {
+      "title": "사건이 아직 없습니다",
+      "body": "사건을 입력하면 분석이 여기에 표시됩니다."
+    },
+    "loading": "분석을 불러오는 중...",
+    "error": {
+      "title": "분석을 불러오지 못했습니다",
+      "retry": "다시 시도"
+    },
+    "summary": {
+      "title": "사건 요약",
+      "overview": "사건 개요",
+      "keyIssue": "핵심 쟁점",
+      "parties": "당사자",
+      "claim": "청구",
+      "statutes": "관련 법령"
+    },
+    "detailed": {
+      "title": "상세 분석",
+      "factPattern": "정리된 사실관계",
+      "legalAnalysis": "법적 분석",
+      "applicableStatutes": "적용 법령",
+      "statuteCitation": "법령",
+      "statuteWhy": "왜 적용되는가",
+      "strategicNotes": "전략 메모",
+      "openQuestions": "확인 필요 질문"
+    },
+    "why": {
+      "title": "왜 이 판례인가",
+      "noMatches": "표시할 판례가 없습니다.",
+      "reasoning": "법적 근거",
+      "pairedMappings": "사실 대응표",
+      "userFactCol": "사용자 사실",
+      "precedentFactCol": "판례 사실",
+      "sameBecauseCol": "같은 이유",
+      "citationStrategy": "인용 전략",
+      "distinguishingRisk": "구별 위험",
+      "expand": "자세히 보기",
+      "collapse": "접기"
+    }
+  },
+  "shell": {
+    "emptyDashboard": "사이드바에서 사건을 선택하거나 새로 만들어 시작하세요.",
+    "noAnalysisYet": "아래 입력창에 사실관계를 입력하고 전송하면 분석 결과가 여기 표시됩니다."
+  },
+  "sidebar": {
+    "newCase": "+ 새 사건",
+    "newFolder": "새 폴더",
+    "addFolder": "폴더 추가",
+    "addCase": "사건 파일 추가",
+    "rename": "이름 변경",
+    "delete": "삭제",
+    "emptyState": "아직 사건이 없습니다. 아래 '새 사건' 버튼을 눌러 시작하세요.",
+    "confirmDeleteFolder": "이 폴더와 하위 사건을 모두 삭제할까요?",
+    "confirmDeleteCase": "이 사건을 삭제할까요?",
+    "inbox": "받은 사건",
+    "newFolderDefault": "새 폴더",
+    "untitledCase": "이름 없는 사건"
+  },
+  "chat": {
+    "placeholder": "사건의 사실관계를 자세히 입력하세요. 당사자, 경위, 청구원인, 손해, 일시 등을 포함해 주세요.",
+    "send": "전송",
+    "attachFile": "파일 첨부",
+    "startRecording": "음성 입력 시작",
+    "stopRecording": "음성 입력 중지",
+    "dropFiles": "여기에 파일을 놓으세요",
+    "extracting": "법적 요소 추출 중...",
+    "untitledCase": "이름 없는 사건"
+  },
+  "chips": {
+    "summarize": {
+      "label": "사례 요약",
+      "prompt": "다음 사건을 요약해 주세요: "
+    },
+    "analyze": {
+      "label": "상세 분석",
+      "prompt": "다음 사건의 법적 쟁점을 상세히 분석해 주세요: "
+    },
+    "precedents": {
+      "label": "인용 가능 판례",
+      "prompt": "이 사건에 인용 가능한 대법원 판례를 찾아주세요: "
+    },
+    "counter": {
+      "label": "반대 측 예상 논거",
+      "prompt": "이 사건에서 상대방이 제기할 수 있는 반박 논거를 분석해 주세요: "
+    },
+    "statutes": {
+      "label": "적용 법령",
+      "prompt": "이 사건에 적용될 수 있는 법령(조문)을 분석해 주세요: "
+    }
+  },
+  "header": {
+    "newCase": "새 사건",
+    "renameCase": "사건 이름 변경",
+    "toggleLocale": "언어 전환",
+    "settings": "설정"
+  }
+}

@@ -1,0 +1,17 @@
+node_modules/
+.next/
+out/
+dist/
+.env
+.env.local
+.env*.local
+*.log
+.DS_Store
+.vercel
+next-env.d.ts
+.swarm/
+.claude-flow/
+ruvector.db
+agentdb.rvf
+agentdb.rvf.lock
+*.tsbuildinfo
