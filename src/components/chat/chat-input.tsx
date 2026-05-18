@@ -151,20 +151,41 @@ export function ChatInput() {
         ]);
         try {
           const formData = new FormData();
-          formData.append("file", file);
+          // Backend (/api/upload) reads from formData.getAll("files") — must be plural.
+          formData.append("files", file);
           const res = await fetch("/api/upload", {
             method: "POST",
             body: formData,
           });
-          if (!res.ok) throw new Error(`Upload failed: ${res.status}`);
-          const data = (await res.json()) as { extractedText: string };
-          const extracted = (data.extractedText ?? "").trim();
+          if (!res.ok) {
+            const body = (await res.json().catch(() => null)) as
+              | { error?: string }
+              | null;
+            throw new Error(
+              body?.error ?? `Upload failed: ${res.status}`,
+            );
+          }
+          const data = (await res.json()) as {
+            files: Array<{
+              filename: string;
+              text: string;
+              warnings: string[];
+            }>;
+          };
+          const extractedFile = data.files?.[0];
+          const extracted = (extractedFile?.text ?? "").trim();
           if (extracted) {
             setValue((prev) => {
               const sep =
                 prev.length > 0 && !prev.endsWith("\n") ? "\n\n" : "";
               return `${prev}${sep}---\n[FROM FILE: ${file.name}]\n${extracted}`;
             });
+          } else if (extractedFile?.warnings?.length) {
+            // No extracted text (e.g. HWP, scanned PDF) — surface the warning
+            // inline instead of silently dropping the upload.
+            console.warn(
+              `[upload] ${file.name}: ${extractedFile.warnings.join("; ")}`,
+            );
           }
           setUploads((u) =>
             u.map((it) =>
