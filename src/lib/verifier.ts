@@ -45,8 +45,13 @@ export async function verifyCitation(caseNumber: string): Promise<boolean> {
   }
 
   // law.go.kr open API pattern. We use `prec` (판례) target with JSON output.
+  //
+  // HTTP (not HTTPS): law.go.kr's HTTPS configuration is broken — the TLS
+  // handshake silently fails from many clients (Node fetch, curl SSL on
+  // Windows). HTTP works reliably. The Open API doesn't transmit credentials
+  // (the OC value is public-ish and rotates IP-bound), so HTTP is acceptable.
   const url =
-    `https://www.law.go.kr/DRF/lawSearch.do?` +
+    `http://www.law.go.kr/DRF/lawSearch.do?` +
     `OC=${encodeURIComponent(apiKey)}` +
     `&target=prec&type=JSON&search=${encodeURIComponent(key)}`;
 
