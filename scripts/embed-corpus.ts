@@ -17,8 +17,14 @@ const CORPUS_PATH = path.join(process.cwd(), "src", "data", "corpus.json");
 const EMBEDDINGS_PATH = path.join(process.cwd(), "src", "data", "corpus-embeddings.json");
 
 /** Build the precedent-side embedding text. Order is tuned for legal retrieval. */
+// text-embedding-3-small has an 8192-token limit. Korean characters are ~2
+// chars/token in BPE, so cap by characters (~16k = ~8k tokens; we use 12k
+// to stay safely below). Truncation favors the most useful fields by ordering
+// them first; trailing fields get cut if the total is too long.
+const MAX_EMBED_TEXT_CHARS = 8_000;
+
 function buildPrecedentText(p: Precedent): string {
-  return [
+  const full = [
     p.caseTitle,
     p.coreIssue,
     p.legalRelationship,
@@ -29,6 +35,17 @@ function buildPrecedentText(p: Precedent): string {
   ]
     .filter(Boolean)
     .join("\n\n");
+  if (full.length <= MAX_EMBED_TEXT_CHARS) return full;
+  // Truncate at a sentence boundary if possible.
+  const truncated = full.slice(0, MAX_EMBED_TEXT_CHARS);
+  const lastBreak = Math.max(
+    truncated.lastIndexOf("\n\n"),
+    truncated.lastIndexOf(". "),
+    truncated.lastIndexOf("다. "),
+  );
+  return lastBreak > MAX_EMBED_TEXT_CHARS * 0.7
+    ? truncated.slice(0, lastBreak)
+    : truncated;
 }
 
 interface EmbeddingRecord {

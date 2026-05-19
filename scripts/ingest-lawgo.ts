@@ -43,6 +43,13 @@ interface Flags {
   out: string;
   dryRun: boolean;
   resume: boolean;
+  /**
+   * When true, skip cases whose caseNumber uses the new "대법원-YYYY-X-NNNNNN"
+   * NTS-prefix format. Those cases come from the 국세법령정보시스템 data
+   * source and the detail endpoint returns empty for them on h7874-level keys.
+   * Filtering them out yields a corpus where ~100% of cases have full detail.
+   */
+  skipNtsPrefix: boolean;
 }
 
 function todayIso(): string {
@@ -61,6 +68,7 @@ function parseFlags(argv: string[]): Flags {
     out: path.join("src", "data", "corpus-lawgo.json"),
     dryRun: false,
     resume: false,
+    skipNtsPrefix: false,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -83,6 +91,9 @@ function parseFlags(argv: string[]): Flags {
       case "--resume":
         flags.resume = true;
         break;
+      case "--skip-nts-prefix":
+        flags.skipNtsPrefix = true;
+        break;
       default:
         if (a.startsWith("--")) {
           console.warn(`[ingest-lawgo] Unknown flag: ${a}`);
@@ -90,6 +101,15 @@ function parseFlags(argv: string[]): Flags {
     }
   }
   return flags;
+}
+
+/** Returns true if the caseNumber starts with "대법원" — this captures both
+ *  the hyphenated NTS format ("대법원-2025-두-34763") AND the compact
+ *  variant ("대법원2026두30055"). Both come from the 국세법령정보시스템
+ *  data source whose detail endpoint is unavailable on h7874-tier keys.
+ *  Old-format cases start with the year ("2024도15728"), not "대법원". */
+function isNtsPrefixCaseNumber(cn: string): boolean {
+  return /^대법원/.test(cn);
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -206,6 +226,12 @@ async function main(): Promise<void> {
     }
     for (const item of listRes.items) {
       if (existing.has(item.caseNumber)) continue;
+      if (flags.skipNtsPrefix && isNtsPrefixCaseNumber(item.caseNumber)) {
+        // These cases come from 국세법령정보시스템 and their detail endpoint
+        // returns empty on h7874-tier keys. Filter them out so the resulting
+        // corpus has 100% rich content.
+        continue;
+      }
       candidates.push(item);
       if (candidates.length >= flags.limit) break;
     }

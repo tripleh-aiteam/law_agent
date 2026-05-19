@@ -26,8 +26,8 @@ const MODEL_ID = "openai/text-embedding-3-small";
 /** Output dimensionality of text-embedding-3-small. */
 export const EMBEDDING_DIMS = 1536;
 
-const QUERY_TIMEOUT_MS = 20_000;
-const BATCH_TIMEOUT_MS = 60_000;
+const QUERY_TIMEOUT_MS = 30_000;
+const BATCH_TIMEOUT_MS = 180_000;
 
 /** Embed a single text. `role` is accepted for API compat but is a no-op here. */
 export async function embedTextLocal(

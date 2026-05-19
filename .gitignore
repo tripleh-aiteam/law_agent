@@ -19,3 +19,5 @@ agentdb.rvf.lock
 # Smoke-test artifacts (regenerable via npm run ingest:lawgo)
 src/data/corpus-lawgo-pilot.json
 src/data/corpus-lawgo.json.failed.json
+
+.vercel
