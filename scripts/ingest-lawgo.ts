@@ -25,8 +25,12 @@ import {
   checkApiKey,
   getMode,
 } from "../src/lib/lawgo-client";
-import { normalizeToPrecedent } from "../src/lib/lawgo-normalizer";
+import {
+  normalizeToPrecedent,
+  normalizeFromListItem,
+} from "../src/lib/lawgo-normalizer";
 import { PrecedentSchema, type Precedent } from "../src/lib/types";
+import type { LawGoListItem } from "../src/lib/lawgo-client";
 
 // ────────────────────────────────────────────────────────────────────────────
 // CLI parsing
@@ -171,7 +175,9 @@ async function main(): Promise<void> {
   }
 
   // ── List phase: paginate until we have enough new candidates ──────────────
-  const candidates: { caseId: string; caseNumber: string; caseTitle: string }[] = [];
+  // We keep the full LawGoListItem so the list-only fallback has every field
+  // it needs (decisionDate, caseNature, etc.) when detail is unavailable.
+  const candidates: LawGoListItem[] = [];
   let page = 1;
   const displayPerPage = mode === "api" ? 100 : 20;
   let totalReported = 0;
@@ -200,11 +206,7 @@ async function main(): Promise<void> {
     }
     for (const item of listRes.items) {
       if (existing.has(item.caseNumber)) continue;
-      candidates.push({
-        caseId: item.caseId,
-        caseNumber: item.caseNumber,
-        caseTitle: item.caseTitle,
-      });
+      candidates.push(item);
       if (candidates.length >= flags.limit) break;
     }
     page += 1;
@@ -222,34 +224,50 @@ async function main(): Promise<void> {
   let skipped = 0;
   const total = candidates.length;
 
+  let listOnlyFallbacks = 0;
   for (let i = 0; i < candidates.length; i++) {
     const c = candidates[i];
     const tag = `[${i + 1}/${total}]`;
+    let precedent: Precedent;
+    let detailError: string | null = null;
     let detail;
     try {
       detail = await getPrecedentDetail(c.caseId);
     } catch (err) {
-      const reason = (err as Error).message;
-      console.warn(`${tag} 대법원 ${c.caseNumber} — ${c.caseTitle} ✗ detail: ${reason}`);
-      failures.push({ caseId: c.caseId, caseNumber: c.caseNumber, caseTitle: c.caseTitle, stage: "detail", reason });
-      skipped++;
-      continue;
+      detailError = (err as Error).message;
     }
 
-    let precedent: Precedent;
-    try {
-      precedent = await normalizeToPrecedent(detail);
-    } catch (err) {
-      const reason = (err as Error).message;
-      console.warn(`${tag} 대법원 ${c.caseNumber} — ${c.caseTitle} ✗ normalize: ${reason}`);
-      failures.push({ caseId: c.caseId, caseNumber: c.caseNumber, caseTitle: c.caseTitle, stage: "normalize", reason });
-      skipped++;
-      continue;
+    if (detail) {
+      // Detail path — full holding/summary/facts from the real opinion text.
+      try {
+        precedent = await normalizeToPrecedent(detail);
+      } catch (err) {
+        const reason = (err as Error).message;
+        console.warn(`${tag} 대법원 ${c.caseNumber} — ${c.caseTitle} ✗ normalize: ${reason}`);
+        failures.push({ caseId: c.caseId, caseNumber: c.caseNumber, caseTitle: c.caseTitle, stage: "normalize", reason });
+        skipped++;
+        continue;
+      }
+      collected.push(precedent);
+      success++;
+      console.log(`${tag} 대법원 ${precedent.caseNumber} — ${precedent.caseTitle || "(제목없음)"} ✓`);
+    } else {
+      // List-only fallback — typical when OC key lacks detail access (e.g. h7874)
+      // or the calling IP hasn't been registered yet.
+      try {
+        precedent = await normalizeFromListItem(c);
+      } catch (err) {
+        const reason = (err as Error).message;
+        console.warn(`${tag} 대법원 ${c.caseNumber} — ${c.caseTitle} ✗ list-only: ${reason} (detail err: ${detailError})`);
+        failures.push({ caseId: c.caseId, caseNumber: c.caseNumber, caseTitle: c.caseTitle, stage: "normalize", reason });
+        skipped++;
+        continue;
+      }
+      collected.push(precedent);
+      success++;
+      listOnlyFallbacks++;
+      console.log(`${tag} 대법원 ${precedent.caseNumber} — ${precedent.caseTitle || "(제목없음)"} ✓ [list-only]`);
     }
-
-    collected.push(precedent);
-    success++;
-    console.log(`${tag} 대법원 ${precedent.caseNumber} — ${precedent.caseTitle || "(제목없음)"} ✓`);
 
     // Periodically flush so progress survives crashes when in --resume mode.
     if (!flags.dryRun && success % 25 === 0) {
@@ -271,6 +289,10 @@ async function main(): Promise<void> {
 
   console.log("──────────────────────────────────────────────────────────────────");
   console.log(`INGEST COMPLETE — ${success}/${total} new cases ingested, ${skipped} skipped.`);
+  if (listOnlyFallbacks > 0) {
+    console.log(`   List-only fallbacks: ${listOnlyFallbacks} (detail unavailable — likely demo OC key or unregistered IP)`);
+    console.log(`   These records have placeholder holding/summary. Upgrade by registering your IP at open.law.go.kr → re-running ingest.`);
+  }
   console.log(`   Total in ${outPath}: ${collected.length}`);
   console.log(`   Next step: npm run embed:corpus`);
   console.log(`   (If happy, replace src/data/corpus.json with ${outPath} and re-run embed.)`);

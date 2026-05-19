@@ -15,3 +15,7 @@ ruvector.db
 agentdb.rvf
 agentdb.rvf.lock
 *.tsbuildinfo
+
+# Smoke-test artifacts (regenerable via npm run ingest:lawgo)
+src/data/corpus-lawgo-pilot.json
+src/data/corpus-lawgo.json.failed.json

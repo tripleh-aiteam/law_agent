@@ -8,9 +8,10 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
-    "embed:corpus": "tsx scripts/embed-corpus.ts",
-    "ingest:lawgo": "tsx scripts/ingest-lawgo.ts",
-    "check:lawgo": "tsx scripts/check-lawgo-key.ts"
+    "embed:corpus": "tsx --env-file=.env.local scripts/embed-corpus.ts",
+    "ingest:lawgo": "tsx --env-file=.env.local scripts/ingest-lawgo.ts",
+    "check:lawgo": "tsx --env-file=.env.local scripts/check-lawgo-key.ts",
+    "merge:corpus": "tsx scripts/merge-corpus.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^2.0.0",
