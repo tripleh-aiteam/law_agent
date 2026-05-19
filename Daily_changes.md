@@ -2,6 +2,88 @@
 
 ---
 
+## 2026-05-19 (Tuesday) — Track A: production deploy + real 대법원 corpus (409 cases)
+
+### Goal
+
+Take the agent from "ngrok demo on laptop" to "live production URL with a real Korean Supreme Court corpus and auto-deploy from GitHub". This is Track A from yesterday's "what's missing" list ("Make it real").
+
+### What shipped
+
+**1. Production deployment on Vercel Pro**
+- Live at: **https://law-agent-jet.vercel.app**
+- Linked to team `triplehs-projects-de5883b3`, project `law-agent`
+- GitHub auto-deploy connected — every `git push` to main triggers a production build (~25 sec).
+- Env vars set on Production + Development environments: `GROQ_API_KEY`, `AI_GATEWAY_API_KEY`, `LAW_GO_KR_API_KEY`.
+- All 7 user-facing API routes (`/api/extract`, `/api/search`, `/api/case/{summarize,detailed,why}`, `/api/upload`, `/api/verify`) ship as Vercel Functions.
+
+**2. Swapped embeddings: local transformers.js → Vercel AI Gateway**
+- Old: `@huggingface/transformers` (`Xenova/multilingual-e5-base`, 768-dim, ~280 MB ONNX) — exceeded Vercel's 250 MB function size limit.
+- New: `openai/text-embedding-3-small` (1536-dim) via Vercel AI Gateway — covered by Pro credits.
+- Tried Google AI Studio first; user's project got `"Your project has been denied access"` on every Gemini embedding model. Tried OpenAI direct; quota was $0. Vercel AI Gateway via Pro bypassed both.
+- [`src/lib/local-embed.ts`](src/lib/local-embed.ts) rewritten — function signatures preserved so `retrieval.ts`/`embed-corpus.ts` didn't need touching. `BATCH_TIMEOUT_MS` bumped 60s → 180s to accommodate AI Gateway's internal retry pacing.
+- [`next.config.ts`](next.config.ts) — dropped `serverExternalPackages: ['@huggingface/transformers']`.
+
+**3. law.go.kr ingest unlock**
+- User's Korean colleague registered the user's home IP (`121.166.205.183`) under the `h7874` OC at open.law.go.kr.
+- Discovered: this DID unlock the lawService detail endpoint for **older-format case numbers** (e.g. `2024도15728`, `2017다220744`).
+- Cases with the new NTS-prefix format (`대법원-2025-두-34763` / `대법원2026두30055`) remained blocked at detail — those come from the 국세법령정보시스템 data source whose detail endpoint is unavailable on h7874-tier keys regardless of IP.
+- [`scripts/ingest-lawgo.ts`](scripts/ingest-lawgo.ts): added `--skip-nts-prefix` flag with `isNtsPrefixCaseNumber()` filter (`/^대법원/`) that catches both hyphenated and compact NTS variants. Older-format cases pass through.
+- 20-case pilot: 19/20 = 95% full detail (vs 50% before the filter).
+- 300-case ingest: 300/300 = **100% full detail**.
+
+**4. Corpus merge + re-embed**
+- [`scripts/merge-corpus.ts`](scripts/merge-corpus.ts) merged the 300 new cases with the prior 214-case corpus. 105 overlaps auto-resolved (real cases win over seed/placeholder).
+- Final corpus: **409 unique 대법원 cases**.
+- ~310 with full 판시사항 + 판결요지 + 전문; ~99 still list-only (from previous ingest's NTS subset — these still surface but get a "metadata only" placeholder banner).
+- [`scripts/embed-corpus.ts`](scripts/embed-corpus.ts): added `MAX_EMBED_TEXT_CHARS = 8_000` truncation in `buildPrecedentText()` so no single embedding input exceeds OpenAI's 8,192-token limit (Korean averages ~1 char/token). Truncation prefers sentence boundaries.
+- All 409 re-embedded in 59 seconds via the gateway.
+
+**5. Verifier debugging (HTTP/HTTPS + parameter shape)**
+- Two real bugs found in the citation verifier while testing production:
+  - Used `https://` — law.go.kr's HTTPS configuration is broken; switching to `http://` fixed the silent empty-body issue.
+  - Used `search=<caseNumber>` — that parameter is actually a search-mode code (1=title, 2=case number), NOT the search text. Fix: use `query=<caseNumber>`. Verified by probing law.go.kr directly.
+- Both fixed in [`src/lib/verifier.ts`](src/lib/verifier.ts).
+- However: **production verifier is still degraded** because Vercel's egress IPs (`35.168.18.176`, `98.83.157.206`, etc. — US AWS) can't reach `www.law.go.kr` at all (returns `"fetch failed"`). law.go.kr seems to block Vercel's IP ranges at the network level.
+- Fix when convenient: enable Vercel Pro **Dedicated Egress IP** in a Korean-friendly region (Singapore/Tokyo), register that IP at open.law.go.kr alongside the user's home IP. Then the verifier upgrades for production.
+
+**6. Added two debug helpers**
+- [`src/app/api/egress-ip/route.ts`](src/app/api/egress-ip/route.ts): `GET /api/egress-ip` returns the function's outbound IP. Used to discover Vercel's egress pool isn't stable.
+- [`src/app/api/debug-lawgo/route.ts`](src/app/api/debug-lawgo/route.ts): `GET /api/debug-lawgo?cn=<casenumber>&proto=https|http` dumps exactly what law.go.kr returns from inside a Vercel function. Used to confirm the network-level block.
+
+### Files
+
+- Modified: [`scripts/ingest-lawgo.ts`](scripts/ingest-lawgo.ts), [`scripts/embed-corpus.ts`](scripts/embed-corpus.ts), [`src/lib/local-embed.ts`](src/lib/local-embed.ts), [`src/lib/verifier.ts`](src/lib/verifier.ts), [`src/lib/ai.ts`](src/lib/ai.ts), [`next.config.ts`](next.config.ts), [`.env.example`](.env.example), [`package.json`](package.json), [`.gitignore`](.gitignore)
+- Added: [`scripts/merge-corpus.ts`](scripts/merge-corpus.ts), [`src/app/api/egress-ip/route.ts`](src/app/api/egress-ip/route.ts), [`src/app/api/debug-lawgo/route.ts`](src/app/api/debug-lawgo/route.ts)
+- Data: [`src/data/corpus.json`](src/data/corpus.json) (15 → 409 cases), [`src/data/corpus-embeddings.json`](src/data/corpus-embeddings.json) (768-dim → 1536-dim, 214 → 409 records, ~6 MB)
+
+### What this unblocks
+
+- **Anyone in the world can use the agent** at https://law-agent-jet.vercel.app. No user setup, no API keys.
+- The user's boss / Law team can hit the URL from any device — works 24/7, doesn't depend on the user's PC.
+- Future updates flow automatically: edit code → `git push` → Vercel auto-deploys in ~25 sec.
+- When the user wants more cases: `npm run ingest:lawgo -- --limit N --skip-nts-prefix` → `npm run merge:corpus` → `npm run embed:corpus` → `git push` → live in minutes.
+
+### Next
+
+- **Pending production polish:** enable Vercel Pro Dedicated Egress IP so `/api/verify` works from production (currently returns `verified: false` for everything because Vercel's egress is blocked by law.go.kr). UI gracefully degrades to "출처 미확인" badge — not user-visible as broken.
+- **Cost monitoring:** AI Gateway usage so far is essentially zero (~50k tokens of embeddings). Within Pro's monthly credit allowance with miles to spare.
+- **Track A items still open:** statute (법령) lookup via law.go.kr `target=law`, sentence-level "same statement" matching, re-extract loop after clarifying questions.
+- **Memory:** Ruflo snapshot key `law-agent-final-state-eod-2026-05-19` (forthcoming) will capture this state for the next session.
+
+### Useful test queries to demo
+
+These all return rich, real 대법원 matches now (try at https://law-agent-jet.vercel.app):
+- 임대차 보증금 반환 분쟁
+- 통상임금 / 임금 청구
+- 교통사고 손해배상
+- 부당이득 반환 청구
+- 양도소득세 부과처분 취소
+- 자본시장법 위반 (시세조종)
+- 형사사건 (마약, 성폭력, 횡령, 증거인멸)
+
+---
+
 ### [17:00] Hardening: bilingual fixes, hydration, button discoverability, provider swap (OpenAI → Groq + local embeddings)
 
 - **What:** Fixed five real bugs the user hit while testing v2, then pivoted the entire AI stack to a fully-free setup.
