@@ -9,7 +9,36 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 
-import type { LegalElements, PrecedentMatch } from "@/lib/types";
+import type { CitabilityTier, LegalElements, PrecedentMatch } from "@/lib/types";
+
+/**
+ * 3-tier citability badge.
+ *   strong     → emerald "강한 권위 / Strong authority"
+ *   supporting → amber   "참고 자료 / Supporting authority"
+ *   weak       → slate   "제한 적용 / Limited applicability"
+ * Falls back to the old boolean for any pre-tiered cached matches.
+ */
+function CitabilityBadge({
+  match,
+  tResults,
+}: {
+  match: PrecedentMatch;
+  tResults: (key: string) => string;
+}): React.ReactElement {
+  const tier: CitabilityTier =
+    match.citability ?? (match.citable ? "supporting" : "weak");
+  if (tier === "strong") {
+    return (
+      <Badge variant="success">{tResults("citabilityStrong")}</Badge>
+    );
+  }
+  if (tier === "supporting") {
+    return (
+      <Badge variant="warning">{tResults("citabilitySupporting")}</Badge>
+    );
+  }
+  return <Badge variant="secondary">{tResults("citabilityWeak")}</Badge>;
+}
 
 interface WhyPayload {
   why: {
@@ -142,9 +171,7 @@ function WhyAccordionItem({
           <Badge variant="secondary" className="font-mono">
             {finalScorePct}
           </Badge>
-          <Badge variant={match.citable ? "success" : "warning"}>
-            {match.citable ? tResults("citable") : tResults("notCitable")}
-          </Badge>
+          <CitabilityBadge match={match} tResults={tResults} />
         </div>
         {open ? (
           <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />

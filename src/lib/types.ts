@@ -35,6 +35,17 @@ export const PrecedentSchema = z.object({
 });
 export type Precedent = z.infer<typeof PrecedentSchema>;
 
+/**
+ * Citability is graded into 3 tiers — much better than a binary citable/not
+ * because most analogous precedents fall somewhere in the middle:
+ *  - "strong"    : precedent's holding would survive 인용 scrutiny — direct authority
+ *  - "supporting": worth citing as 참고 / 유추 적용 — analogous authority
+ *  - "weak"      : limited applicability — different legal area or rule
+ *
+ * UI renders these as green / amber / slate badges respectively.
+ */
+export type CitabilityTier = "strong" | "supporting" | "weak";
+
 export interface PrecedentMatch {
   precedent: Precedent;
   scores: {
@@ -45,6 +56,9 @@ export interface PrecedentMatch {
   matchingFacts: string[];
   distinguishingFacts: string[];
   whyMatches: string;
+  /** 3-tier citability assessment. */
+  citability: CitabilityTier;
+  /** Convenience flag derived from citability — true unless tier is "weak". */
   citable: boolean;
   citabilityReason: string;
   verified: boolean;

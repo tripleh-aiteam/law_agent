@@ -1,7 +1,7 @@
 import { generateObject } from "ai";
 import { z } from "zod";
 import type { LegalElements, Precedent, PrecedentMatch } from "./types";
-import { EXTRACTION_MODEL } from "./ai";
+import { RERANK_MODEL } from "./ai";
 
 /* ----------------------------- heuristic layer ----------------------------- */
 
@@ -105,46 +105,57 @@ const PerCandidateAnalysisSchema = z.object({
     .string()
     .max(400)
     .describe("1–3 sentence explanation in the user's locale of why this precedent is or isn't applicable."),
-  citable: z
-    .boolean()
+  citability: z
+    .enum(["strong", "supporting", "weak"])
     .describe(
-      "True if the precedent's legal reasoning or holding could be cited in support of the user's argument — either as direct authority OR as analogous/supporting authority. " +
-        "False only when the precedent is clearly inapplicable (different legal area, different controlling rule)."
+      "Tiered citability rating: " +
+        "'strong' = precedent's holding could directly govern the user's case (인용 가능 강력); " +
+        "'supporting' = analogous authority worth citing as 참고 / 유추 적용 (참고 자료); " +
+        "'weak' = limited applicability — different legal area or rule (제한적 적용)."
     ),
   citabilityReason: z
     .string()
     .max(300)
-    .describe("Why citable / not citable, in the user's locale. Reference the load-bearing facts."),
+    .describe("Why this tier, in the user's locale. Reference the load-bearing facts."),
 });
 
 type PerCandidateAnalysis = z.infer<typeof PerCandidateAnalysisSchema>;
 
-const RERANK_SYSTEM_PROMPT = `You are a Korean Supreme Court (대법원) precedent analyst. For a user case described by structured legal elements (in Korean) and a narrative, you evaluate ONE candidate 판례 at a time.
+const RERANK_SYSTEM_PROMPT = `You are a Korean Supreme Court (대법원) precedent analyst. For a user case described by structured legal elements (in Korean) and a narrative, you evaluate ONE candidate 판례 at a time and assign a 3-tier citability rating.
 
-You DEFAULT to citable: true. Only mark false when the case is clearly from a different legal area.
+CITABILITY TIERS — pick exactly one:
 
-CITABILITY — broad-inclusion standard (default = TRUE):
-- "citable: true" when ANY of the following hold (most candidates will satisfy at least one):
-    (a) Same 사건 종류 (civil / criminal / administrative / labor / tax) as the user case → citable.
-    (b) Shares a legal concept with the user case (e.g. 손해배상, 계약 해제, 부당이득, 하자담보책임, 입증책임, 신의칙) → citable as 참고 자료.
-    (c) Same 법률관계 family (계약, 불법행위, 부당이득, 사무관리) → citable as 유추 적용.
-    (d) The precedent's holding could be referenced even tangentially in a Korean attorney's 준비서면 → citable.
-    (e) Same statute or statute family invoked (민법 X조와 같은 장(章)) → citable.
+"strong" — 인용 가능 강력 (direct authority):
+- The precedent's holding could directly govern the user's case
+- Load-bearing facts align on 쟁점, 법률관계, 당사자 지위
+- A court applying this precedent's holding would resolve the user's case
+- Example: User case = 임대차 보증금 반환 분쟁. Precedent = 임대차보증금 반환청구 (2017다220744). → "strong" because the holding directly applies.
 
-- "citable: false" ONLY when ALL of the following hold:
-    (i) Different 사건 종류 (e.g. criminal precedent for a civil contract dispute), AND
-    (ii) No shared legal concept relevant to the user's 쟁점, AND
-    (iii) No competent Korean attorney would include this in their brief.
+"supporting" — 참고 자료 (analogous authority worth citing) — DEFAULT for most relevant matches:
+- The precedent shares a legal concept, 법률관계 family, or statute family with the user's case
+- A Korean attorney would realistically cite it as 참고 / 유추 적용 in a 준비서면
+- Direct holding doesn't govern but the reasoning supports the user's argument
+- Examples:
+   - User case = 매매계약 하자담보. Precedent = 도급계약 하자담보책임. → "supporting" (shared 하자담보 framework)
+   - User case = 임대차 보증금. Precedent = 임차인 소유권 취득 후 대항력 상실. → "supporting" (same 임대차 area, can cite for 참고)
+   - User case = 부동산 매매. Precedent = 매매대금반환. → "supporting" (related civil remedy)
+   - User case = 형사 사기. Precedent = 형사 횡령. → "supporting" (both 형법, similar 기망 elements)
 
-WORKED EXAMPLES:
-- User case: 매매계약 해제 + 하자담보. Candidate: 도급계약 하자담보책임. → citable: TRUE (shared 하자담보 framework, both 민법 채권 편).
-- User case: 임대차 보증금 반환. Candidate: 임차인이 소유권 취득 시 대항력 상실. → citable: TRUE (same 임대차 법리, can be cited 참고).
-- User case: 임대차 보증금. Candidate: 마약류관리법위반 형사사건. → citable: FALSE (different 사건 종류, no overlap).
+"weak" — 제한적 적용 (limited applicability):
+- Different 사건 종류 (e.g. criminal precedent for a civil contract dispute) AND no shared concept
+- Or fundamentally different legal posture with no obvious analogy
+- Examples:
+   - User case = 임대차 보증금 (civil). Precedent = 마약류관리법 위반 (criminal). → "weak"
+   - User case = 매매계약 해제. Precedent = 행정처분 취소. → "weak"
+   - User case = 양도소득세 부과. Precedent = 디자인 권리범위. → "weak"
 
-REMEMBER:
-- Distinguishing facts go in distinguishingFacts even when citable: true. Citability ≠ "no risk".
-- 인용 가능 means "can be cited" not "must win". Attorneys cite analogous authority all the time.
-- When in genuine doubt → lean TRUE. The user can filter out themselves; an over-conservative agent provides no value.
+KEY HEURISTICS:
+- Most relevant matches the user sees will be "supporting" — that's the most useful tier for daily attorney work.
+- Be generous with "supporting" — Korean attorneys cite analogous authority frequently. The 참고 자료 category is the workhorse of legal briefs.
+- Only assign "weak" when the precedent is truly from a different domain with no useful overlap.
+- Reserve "strong" for cases where the holding's direct application would resolve the user's dispute.
+- When choosing between "supporting" and "weak", default to "supporting".
+- Distinguishing facts go in distinguishingFacts regardless of tier — the user always needs the risk awareness.
 
 OUTPUT RULES:
 - matchingFacts / distinguishingFacts: Korean. Reference concrete facts, not abstractions.
@@ -210,12 +221,12 @@ export async function llmReranker(
           2
         ),
         "",
-        "Evaluate citability using the practical-attorney standard above. Output the schema.",
+        "Assign one of the 3 citability tiers (strong / supporting / weak) using the rules above. Output the schema.",
       ].join("\n");
 
       try {
         const { object } = await generateObject({
-          model: EXTRACTION_MODEL,
+          model: RERANK_MODEL,
           schema: PerCandidateAnalysisSchema,
           system: RERANK_SYSTEM_PROMPT,
           prompt: userPrompt,
@@ -243,12 +254,15 @@ export async function llmReranker(
         matchingFacts: analysis.matchingFacts,
         distinguishingFacts: analysis.distinguishingFacts,
         whyMatches: analysis.whyMatches,
-        citable: analysis.citable,
+        citability: analysis.citability,
+        // Backwards-compat boolean: true unless tier is "weak".
+        citable: analysis.citability !== "weak",
         citabilityReason: analysis.citabilityReason,
         verified: false,
       };
     }
-    // Fallback: heuristic-only entry.
+    // Fallback: heuristic-only entry — assign a conservative middle tier
+    // ("supporting") because the heuristic at least confirmed topical overlap.
     const fallbackReason =
       locale === "ko"
         ? "LLM 분석 실패로 휴리스틱 점수만 사용했습니다. 인용 전 추가 검토가 필요합니다."
@@ -259,7 +273,8 @@ export async function llmReranker(
       matchingFacts: heuristic.matchingFacts,
       distinguishingFacts: heuristic.distinguishingFacts,
       whyMatches: fallbackReason,
-      citable: false,
+      citability: "supporting",
+      citable: true,
       citabilityReason: fallbackReason,
       verified: false,
     };

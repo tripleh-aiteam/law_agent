@@ -47,7 +47,13 @@ function ResultCard({ match }: { match: PrecedentMatch }) {
   const t = useTranslations("results");
   const [showWhy, setShowWhy] = React.useState(false);
 
-  const { precedent, scores, citable, verified } = match;
+  const { precedent, scores, verified } = match;
+  // 3-tier citability with backward-compat fallback for old boolean-only data.
+  const tier: "strong" | "supporting" | "weak" =
+    match.citability ?? (match.citable ? "supporting" : "weak");
+  const isStrong = tier === "strong";
+  const isSupporting = tier === "supporting";
+  const isWeak = tier === "weak";
 
   return (
     <Card className="overflow-hidden">
@@ -80,15 +86,19 @@ function ResultCard({ match }: { match: PrecedentMatch }) {
           </div>
           <div className="flex flex-shrink-0 flex-wrap items-center gap-1.5">
             <Badge
-              variant={citable ? "default" : "destructive"}
+              variant={isStrong ? "success" : isSupporting ? "warning" : "secondary"}
               className="gap-1"
             >
-              {citable ? (
-                <ShieldCheck className="h-3 w-3" aria-hidden />
-              ) : (
+              {isWeak ? (
                 <ShieldAlert className="h-3 w-3" aria-hidden />
+              ) : (
+                <ShieldCheck className="h-3 w-3" aria-hidden />
               )}
-              {citable ? t("citable") : t("notCitable")}
+              {isStrong
+                ? t("citabilityStrong")
+                : isSupporting
+                  ? t("citabilitySupporting")
+                  : t("citabilityWeak")}
             </Badge>
             <Badge
               variant={verified ? "success" : "warning"}
@@ -130,9 +140,15 @@ function ResultCard({ match }: { match: PrecedentMatch }) {
           </p>
         </section>
 
-        {!citable && match.citabilityReason && (
-          <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs leading-relaxed text-destructive">
-            <span className="font-medium">⚠ {t("notCitable")}: </span>
+        {isWeak && match.citabilityReason && (
+          <div className="rounded-md border border-slate-300 bg-slate-50 px-3 py-2 text-xs leading-relaxed text-slate-700 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-300">
+            <span className="font-medium">⚠ {t("citabilityWeak")}: </span>
+            {match.citabilityReason}
+          </div>
+        )}
+        {isSupporting && match.citabilityReason && (
+          <div className="rounded-md border border-amber-300/60 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-900 dark:border-amber-700/40 dark:bg-amber-950/40 dark:text-amber-200">
+            <span className="font-medium">📎 {t("citabilitySupporting")}: </span>
             {match.citabilityReason}
           </div>
         )}

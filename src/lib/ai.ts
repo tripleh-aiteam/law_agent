@@ -35,6 +35,15 @@ export const EXTRACTION_MODEL = groq("meta-llama/llama-4-scout-17b-16e-instruct"
 /** Larger alternative, also supports structured outputs. */
 export const EXTRACTION_MODEL_FALLBACK = groq("openai/gpt-oss-120b");
 
+/**
+ * Citability rerank model. Uses GPT-4o via Vercel AI Gateway because
+ * Korean legal nuance matters more here than raw speed — the rerank decides
+ * whether a precedent is "강한 권위 / 참고 / 부적합" and weak language models
+ * trend overly conservative on Korean legal text. GPT-4o handles 인용 nuance
+ * meaningfully better than Llama 4 Scout.
+ */
+export const RERANK_MODEL = "openai/gpt-4o" as const;
+
 /** Embedding dimensions — re-exported from local-embed for convenience. */
 export { EMBEDDING_DIMS } from "./local-embed";
 
