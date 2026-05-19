@@ -118,7 +118,7 @@ async function main(): Promise<void> {
   let totalEmbedded = 0;
 
   console.log(
-    `[embed-corpus] First run will download ~280 MB ONNX model — give it a minute.`,
+    `[embed-corpus] Embedding via Vercel AI Gateway → openai/text-embedding-3-small (1536-dim).`,
   );
 
   for (let bi = 0; bi < batches.length; bi++) {

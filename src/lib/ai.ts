@@ -1,14 +1,17 @@
 /**
  * Central AI model exports.
  *
- * Setup (Option B — Groq + local embeddings):
- *   - LLM:        Groq `llama-3.3-70b-versatile` via @ai-sdk/groq (free tier)
- *   - Embeddings: local @huggingface/transformers (Xenova/multilingual-e5-base, 768-dim)
+ * Setup (production / Vercel-compatible):
+ *   - LLM:        Groq `meta-llama/llama-4-scout-17b-16e-instruct`
+ *                 via @ai-sdk/groq (free tier, reliable JSON schema)
+ *   - Embeddings: OpenAI `text-embedding-3-small` (1536-dim) via Vercel AI Gateway
+ *                 (covered by Vercel Pro credits, deploys cleanly — see local-embed.ts)
  *
- * Requires only GROQ_API_KEY in .env.local. No paid OpenAI/Anthropic billing
- * needed. Embeddings run on your own CPU — first call downloads ~280 MB ONNX.
+ * Required env vars:
+ *   - GROQ_API_KEY            (LLM calls — direct to Groq)
+ *   - AI_GATEWAY_API_KEY      (embedding calls — routed via Vercel AI Gateway)
  *
- * Swap providers later by changing the imports below and editing one line.
+ * Swap providers later by changing the imports below.
  */
 import { groq } from "@ai-sdk/groq";
 
