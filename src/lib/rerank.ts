@@ -108,8 +108,8 @@ const PerCandidateAnalysisSchema = z.object({
   citable: z
     .boolean()
     .describe(
-      "True ONLY if this precedent's holding would survive 인용 scrutiny applied to the user's facts. " +
-        "Mere topical relatedness is NOT enough."
+      "True if the precedent's legal reasoning or holding could be cited in support of the user's argument — either as direct authority OR as analogous/supporting authority. " +
+        "False only when the precedent is clearly inapplicable (different legal area, different controlling rule)."
     ),
   citabilityReason: z
     .string()
@@ -121,13 +121,17 @@ type PerCandidateAnalysis = z.infer<typeof PerCandidateAnalysisSchema>;
 
 const RERANK_SYSTEM_PROMPT = `You are a Korean Supreme Court (대법원) precedent analyst. For a user case described by structured legal elements (in Korean) and a narrative, you evaluate ONE candidate 판례 at a time.
 
-Your task is to determine whether the candidate precedent is **citable** for the user's case — meaning the precedent's holding (판시사항) would survive 인용 scrutiny if a Korean court applied it to the user's facts.
+Your task is to determine whether the candidate precedent is **citable** for the user's case — meaning the precedent could realistically be cited in a Korean 준비서면 either as direct authority or as analogous/supporting authority.
 
-CITABILITY RULES (strict):
-- "citable: true" requires that the load-bearing facts of both cases align on the dimensions that drove the precedent's holding: 쟁점, 법률관계, 당사자 지위, and the operative facts the court actually relied on.
-- Topical relatedness is NOT enough. A 판례 on 임대차 has zero citability for a 매매 dispute even if both involve real estate.
-- If the precedent's holding is conditioned on a fact pattern that materially differs from the user's case (e.g. consumer vs. business, written vs. oral, intentional vs. negligent), set citable: false.
-- If material facts are unknown, lean toward citable: false. Don't bluff.
+CITABILITY — practical-attorney standard:
+- "citable: true" when EITHER:
+    (a) the precedent's holding could directly govern the user's case (load-bearing facts align on 쟁점, 법률관계, 당사자 지위), OR
+    (b) the precedent's legal reasoning is analogous and a Korean attorney would realistically cite it as 참고 / 유추 적용 / 동일 법리 to support their argument, even if facts aren't identical.
+- "citable: false" only when the precedent is clearly inapplicable — different legal area, different controlling rule, or fundamentally different legal posture (e.g. citing a criminal 사기 precedent for a civil 임대차 보증금 dispute with no overlap).
+- A 매매 precedent CAN be citable to a different 매매 case for shared legal principles even if the underlying assets differ.
+- An 임대차 precedent CAN be citable to a 사용대차 case for the shared 차주 의무 framework.
+- The standard is "would a competent Korean attorney include this in their brief?" — that's a much wider net than "does the holding directly govern?".
+- Distinguishing facts should still be flagged in distinguishingFacts, even when citable: true. Citability ≠ "no risk".
 
 OUTPUT RULES:
 - matchingFacts / distinguishingFacts: Korean. Reference concrete facts, not abstractions.
@@ -193,7 +197,7 @@ export async function llmReranker(
           2
         ),
         "",
-        "Evaluate citability strictly. Output the schema.",
+        "Evaluate citability using the practical-attorney standard above. Output the schema.",
       ].join("\n");
 
       try {
