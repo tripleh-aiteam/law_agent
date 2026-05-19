@@ -17,8 +17,9 @@ export async function GET(req: Request): Promise<Response> {
     return NextResponse.json({ error: "LAW_GO_KR_API_KEY not set" }, { status: 500 });
   }
 
+  const proto = url.searchParams.get("proto") ?? "https";
   const lawgoUrl =
-    `http://www.law.go.kr/DRF/lawSearch.do?` +
+    `${proto}://www.law.go.kr/DRF/lawSearch.do?` +
     `OC=${encodeURIComponent(apiKey)}` +
     `&target=prec&type=JSON&query=${encodeURIComponent(cn)}`;
 
