@@ -50,10 +50,16 @@ export async function verifyCitation(caseNumber: string): Promise<boolean> {
   // handshake silently fails from many clients (Node fetch, curl SSL on
   // Windows). HTTP works reliably. The Open API doesn't transmit credentials
   // (the OC value is public-ish and rotates IP-bound), so HTTP is acceptable.
+  //
+  // Parameter notes:
+  //   - `query=<text>`  : the actual search text (case number, title, etc.)
+  //   - `search=<int>`  : search-mode code (1=title, 2=case number) — NOT the
+  //                       search text! Sending the case number under `search`
+  //                       returns law.go.kr's generic error page.
   const url =
     `http://www.law.go.kr/DRF/lawSearch.do?` +
     `OC=${encodeURIComponent(apiKey)}` +
-    `&target=prec&type=JSON&search=${encodeURIComponent(key)}`;
+    `&target=prec&type=JSON&query=${encodeURIComponent(key)}`;
 
   try {
     const resp = await fetch(url, {
