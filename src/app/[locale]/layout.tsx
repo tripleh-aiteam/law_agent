@@ -6,7 +6,7 @@ import { routing } from "@/i18n/routing";
 import "../globals.css";
 
 export const metadata: Metadata = {
-  title: "Law Agent — 판례 검색 AI",
+  title: "Law Agent",
   description: "Find Korean Supreme Court precedents by fact pattern.",
 };
 

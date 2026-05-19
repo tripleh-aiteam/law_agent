@@ -1,6 +1,6 @@
 {
   "common": {
-    "appName": "판례 검색 AI",
+    "appName": "Law Agent",
     "appTagline": "사실관계로 찾는 대법원 판례",
     "search": "검색",
     "searching": "검색 중...",

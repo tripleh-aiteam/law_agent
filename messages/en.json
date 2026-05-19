@@ -1,6 +1,6 @@
 {
   "common": {
-    "appName": "Case Law Search AI",
+    "appName": "Law Agent",
     "appTagline": "Find Korean Supreme Court precedents by fact pattern",
     "search": "Search",
     "searching": "Searching...",
