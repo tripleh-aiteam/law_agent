@@ -49,7 +49,11 @@ export function resolveModelForUse(
 
   // Direct providers, in declaration order.
   if (opt.family === "anthropic" && hasEnv("ANTHROPIC_API_KEY")) {
-    return anthropic(modelName);
+    // Anthropic's direct API uses DASH-separated version IDs
+    // (claude-opus-4-7) while the Vercel AI Gateway uses DOT-separated
+    // (claude-opus-4.7). Our registry stores the gateway form; convert
+    // dots to dashes here so direct calls reach the right model.
+    return anthropic(modelName.replace(/\./g, "-"));
   }
   if (opt.family === "openai" && hasEnv("OPENAI_API_KEY")) {
     return openai(modelName);

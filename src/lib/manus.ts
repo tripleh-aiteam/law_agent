@@ -2,29 +2,26 @@
  * Manus AI REST client — creates an autonomous-agent task, polls until
  * complete, returns the text result.
  *
- * IMPORTANT: this client was wired against the PUBLIC documentation surface
- * available at the time of writing (Nov 2026). Manus's full API reference
- * lives behind their developer portal at https://open.manus.ai/docs and
- * may differ in exact field names. The constants at the top of this file
- * (BASE_URL, endpoint paths, body keys, result extraction) are isolated so
- * the user can adjust them in ONE place once they have access to the
- * authoritative spec.
+ * Endpoint shape verified via live probe on 2026-05-20:
+ *   - Base URL:  https://api.manus.ai
+ *   - Auth:      X-Manus-Api-Key header (NOT Bearer)
+ *   - Create:    POST /v1/tasks   body: { prompt, ... }
+ *                 → { task_id, task_title, task_url }
+ *   - Get:       GET  /v1/tasks/{id}
+ *                 → { id, status, output: [{ role, content: [{ text }] }],
+ *                     credit_usage }
+ *   - Status:    "pending" / "in_progress" / "completed" / "failed" /
+ *                "cancelled"
  *
- * If you get 404s or auth errors after dropping in a real MANUS_API_KEY,
- * check the actual Manus docs and tweak:
- *   - MANUS_BASE_URL
- *   - CREATE_TASK_PATH / GET_TASK_PATH
- *   - REQUEST body shape inside createTask()
- *   - RESULT extraction inside extractResult()
+ * NOT an enveloped response — there's no { ok, data } wrapper. Top-level
+ * fields are returned directly. Errors come back as
+ *   { code: int, message: string, details: [...] }
+ * with a 4xx HTTP status.
  */
 
-// Manus API v2 — current as of late 2026. v1 is deprecated and slated for
-// removal. If Manus releases v3 later, change this single block. The
-// auth header format is confirmed Bearer-token (verify on the
-// /docs/getting-started/authentication page once you have a key).
 const MANUS_BASE_URL = "https://api.manus.ai";
-const CREATE_TASK_PATH = "/v2/tasks";
-const GET_TASK_PATH = (id: string) => `/v2/tasks/${encodeURIComponent(id)}`;
+const CREATE_TASK_PATH = "/v1/tasks";
+const GET_TASK_PATH = (id: string) => `/v1/tasks/${encodeURIComponent(id)}`;
 
 /** How often we poll while the task is running (ms). */
 const POLL_INTERVAL_MS = 5_000;
@@ -33,100 +30,110 @@ const POLL_MAX_MS = 25 * 60 * 1000; // 25 min
 
 export type ManusTaskStatus =
   | "pending"
-  | "running"
-  | "complete"
+  | "in_progress"
+  | "completed"
   | "failed"
   | "cancelled";
 
-export interface ManusTask {
+interface ManusOutputContent {
+  type?: string;
+  text?: string;
+}
+
+interface ManusOutputItem {
+  id?: string;
+  status?: string;
+  role?: "user" | "assistant" | "system";
+  type?: string;
+  content?: ManusOutputContent[];
+}
+
+interface ManusCreateResponse {
   task_id: string;
+  task_title?: string;
+  task_url?: string;
+}
+
+interface ManusGetResponse {
+  id: string;
+  object?: string;
+  created_at?: string;
+  updated_at?: string;
   status: ManusTaskStatus;
-  /** Final agent output (populated when status === "complete"). */
-  result?: {
-    text?: string;
-    /** Optional file attachments Manus produced (PDF, markdown, etc.). */
-    artifacts?: Array<{ name: string; url: string; type: string }>;
+  model?: string;
+  metadata?: {
+    task_title?: string;
+    task_url?: string;
   };
-  /** Error detail when status === "failed". */
-  error?: { code?: string; message?: string };
+  output?: ManusOutputItem[];
+  credit_usage?: number;
+}
+
+interface ManusErrorEnvelope {
+  code?: number;
+  message?: string;
+  details?: unknown[];
 }
 
 function authHeaders(): Record<string, string> {
   const key = process.env.MANUS_API_KEY;
-  if (!key) {
+  if (!key || !key.trim()) {
     throw new Error(
-      "MANUS_API_KEY is not set. Add it to .env.local locally and to the Vercel project environment variables to enable the Manus model.",
+      "MANUS_API_KEY is not set. Add it to .env.local locally and to the Vercel project environment variables (exact name MANUS_API_KEY — case matters).",
     );
   }
   return {
     "Content-Type": "application/json",
-    Authorization: `Bearer ${key}`,
+    "X-Manus-Api-Key": key,
   };
 }
 
-/**
- * Unwrap Manus's standard response envelope ({ ok, request_id, data | error })
- * into either the inner `data` object or throw a thrown Error with the
- * Manus-supplied error message.
- */
-async function unwrap<T>(res: Response): Promise<T> {
+/** Raise an Error from a failed Manus HTTP response. */
+async function throwFromResponse(res: Response): Promise<never> {
   let body: unknown;
   try {
     body = await res.json();
   } catch {
     throw new Error(`Manus API: non-JSON response (HTTP ${res.status})`);
   }
-  const env = body as {
-    ok?: boolean;
-    data?: T;
-    error?: { code?: string; message?: string };
-  };
-  if (!res.ok || env.ok === false || env.error) {
-    const code = env.error?.code ?? `http_${res.status}`;
-    const msg = env.error?.message ?? `Manus API error (HTTP ${res.status})`;
-    throw new Error(`[${code}] ${msg}`);
-  }
-  if (!env.data) {
-    throw new Error("Manus API: missing `data` field in successful response");
-  }
-  return env.data;
+  const env = body as ManusErrorEnvelope;
+  const code = typeof env.code === "number" ? env.code : res.status;
+  const message =
+    env.message ?? `Manus API error (HTTP ${res.status})`;
+  throw new Error(`[http_${code}] ${message}`);
 }
 
-/**
- * POST /v1/tasks — kick off a new autonomous-agent task. Returns the
- * task id immediately; use waitForCompletion() to block until the task
- * finishes.
- */
+/** POST /v1/tasks — kick off a new autonomous-agent task. */
 export async function createTask(
   prompt: string,
   signal?: AbortSignal,
-): Promise<ManusTask> {
+): Promise<{ task_id: string; task_url?: string }> {
   const res = await fetch(`${MANUS_BASE_URL}${CREATE_TASK_PATH}`, {
     method: "POST",
     headers: authHeaders(),
-    body: JSON.stringify({
-      prompt,
-      // Manus's PHP SDK uses these option names; verify against actual
-      // docs if your dev tier rejects them.
-      taskMode: "agent",
-      agentProfile: "manus-1.6",
-    }),
+    body: JSON.stringify({ prompt }),
     signal,
   });
-  return unwrap<ManusTask>(res);
+  if (!res.ok) await throwFromResponse(res);
+  const data = (await res.json()) as ManusCreateResponse;
+  if (!data.task_id) {
+    throw new Error("Manus API: response missing task_id");
+  }
+  return { task_id: data.task_id, task_url: data.task_url };
 }
 
 /** GET /v1/tasks/{id} — single status read. */
 export async function getTask(
   taskId: string,
   signal?: AbortSignal,
-): Promise<ManusTask> {
+): Promise<ManusGetResponse> {
   const res = await fetch(`${MANUS_BASE_URL}${GET_TASK_PATH(taskId)}`, {
     method: "GET",
     headers: authHeaders(),
     signal,
   });
-  return unwrap<ManusTask>(res);
+  if (!res.ok) await throwFromResponse(res);
+  return (await res.json()) as ManusGetResponse;
 }
 
 /** Sleep that honors AbortSignal — rejects with AbortError on abort. */
@@ -153,19 +160,18 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 }
 
 /**
- * Poll a task until it reaches a terminal status (complete / failed /
- * cancelled) OR we hit POLL_MAX_MS — whichever comes first. Honors the
- * caller's AbortSignal so the Stop button can cancel the wait promptly.
+ * Poll a task until it reaches a terminal status (completed / failed /
+ * cancelled) OR we hit POLL_MAX_MS — whichever comes first.
  */
 export async function waitForCompletion(
   taskId: string,
   signal?: AbortSignal,
-): Promise<ManusTask> {
+): Promise<ManusGetResponse> {
   const deadline = Date.now() + POLL_MAX_MS;
   while (true) {
     const task = await getTask(taskId, signal);
     if (
-      task.status === "complete" ||
+      task.status === "completed" ||
       task.status === "failed" ||
       task.status === "cancelled"
     ) {
@@ -173,7 +179,7 @@ export async function waitForCompletion(
     }
     if (Date.now() > deadline) {
       throw new Error(
-        `Manus task timed out after ${POLL_MAX_MS / 60_000} minutes. Task id: ${taskId}. Check task status at https://manus.im/tasks/${taskId} or extend POLL_MAX_MS.`,
+        `Manus task timed out after ${POLL_MAX_MS / 60_000} minutes. Task: ${task.metadata?.task_url ?? taskId}`,
       );
     }
     await sleep(POLL_INTERVAL_MS, signal);
@@ -181,33 +187,48 @@ export async function waitForCompletion(
 }
 
 /**
- * Convenience: create + await + extract result text in one call.
- * Throws on failure (failed task, abort, timeout, network) — caller wraps
- * the error in their own branch-status update.
+ * Pull the final assistant text out of a completed task's output array.
+ * Manus returns the agent's response as one or more items with
+ * role==='assistant' and content of type 'output_text'.
  */
-type ManusArtifact = { name: string; url: string; type: string };
+function extractFinalText(task: ManusGetResponse): string {
+  const items = task.output ?? [];
+  // The final assistant message tends to be near the end of the array;
+  // concatenate ALL assistant text in order to be safe.
+  const assistantChunks: string[] = [];
+  for (const item of items) {
+    if (item.role !== "assistant") continue;
+    for (const c of item.content ?? []) {
+      if (typeof c.text === "string" && c.text.trim()) {
+        assistantChunks.push(c.text);
+      }
+    }
+  }
+  return assistantChunks.join("\n\n").trim();
+}
 
+/**
+ * Convenience: create + await + extract result text in one call.
+ * Throws on failure — caller wraps the error in branch-status update.
+ */
 export async function runManusAgent(
   prompt: string,
   signal?: AbortSignal,
-): Promise<{ text: string; artifacts: ManusArtifact[] | undefined }> {
+): Promise<{ text: string; taskUrl?: string }> {
   const created = await createTask(prompt, signal);
   const finished = await waitForCompletion(created.task_id, signal);
 
   if (finished.status === "failed") {
-    throw new Error(
-      finished.error?.message ??
-        "Manus task failed without a specific error message.",
-    );
+    throw new Error("Manus task failed (no specific error from the API).");
   }
   if (finished.status === "cancelled") {
     throw new DOMException("Aborted", "AbortError");
   }
-  const text = finished.result?.text?.trim();
+  const text = extractFinalText(finished);
   if (!text) {
     throw new Error(
-      "Manus task completed but returned no text output. Check task page on manus.im for artifacts.",
+      `Manus task completed but returned no text output. View it at ${finished.metadata?.task_url ?? created.task_url ?? "manus.im"}.`,
     );
   }
-  return { text, artifacts: finished.result?.artifacts };
+  return { text, taskUrl: finished.metadata?.task_url ?? created.task_url };
 }

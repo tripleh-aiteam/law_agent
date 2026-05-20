@@ -94,8 +94,9 @@ export const MODEL_OPTIONS: ModelOption[] = [
     family: "openai",
     tier: "premium",
     description:
-      "Deep chain-of-thought reasoning specialist. Best for complex multi-step legal analysis. Slower but very thorough. ~$0.20/query.",
+      "Deep chain-of-thought reasoning specialist. ⚠ REQUIRES VERIFIED ORGANIZATION at platform.openai.com/settings/organization/general. ~$0.20/query.",
     korean: 4,
+    experimental: true,
   },
   {
     id: "openai/gpt-4o",

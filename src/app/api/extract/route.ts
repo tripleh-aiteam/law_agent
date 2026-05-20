@@ -114,16 +114,31 @@ export async function POST(req: Request): Promise<Response> {
       ? resolveModel(parsed.data.model).family
       : undefined;
     const envVar = directKeyEnvVar(family);
-    const message =
-      lower.includes("insufficient funds") || lower.includes("insufficient_funds")
-        ? envVar
-          ? `${parsed.data.model} routed through the Vercel AI Gateway, which is out of credit. Fix: either (1) add ${envVar} to your Vercel project environment variables to route this model directly, OR (2) top up the AI Gateway at vercel.com → AI Gateway → Top up.`
-          : `${parsed.data.model} routed through the Vercel AI Gateway, which is out of credit. Top up the gateway, or pick a different model.`
-        : rawMessage.includes("did not match schema")
-          ? "분석할 수 없는 형식입니다. 학술 자료가 아닌, 실제 사건의 사실관계(당사자, 청구원인, 일시 등)를 포함하여 입력해 주세요. / The input doesn't look like a case — please include real party facts, claims, and dates."
-          : rawMessage.includes("could not parse")
-            ? "모델이 유효한 JSON을 반환하지 못했습니다. 다른 모델로 다시 시도해 주세요. / Model returned unparseable output — try a different model."
-            : rawMessage;
+
+    // OpenAI quota / org-verification errors. These are NOT code bugs —
+    // they're billing/account issues at OpenAI's end. Rewrite the raw
+    // OpenAI message into something actionable.
+    const isOpenAiQuota =
+      family === "openai" &&
+      (lower.includes("exceeded your current quota") ||
+        lower.includes("insufficient_quota"));
+    const isOpenAiOrgVerification =
+      family === "openai" &&
+      lower.includes("organization must be verified");
+
+    const message = isOpenAiQuota
+      ? `${parsed.data.model}: Your OpenAI account has no remaining credit. Add credit at https://platform.openai.com/settings/organization/billing/overview, then retry. (Other models in this comparison may still work — Claude / Gemini / Manus use separate billing.)`
+      : isOpenAiOrgVerification
+        ? `${parsed.data.model}: OpenAI requires "Verified Organization" status for this model. Go to https://platform.openai.com/settings/organization/general and click "Verify Organization" (may need a government ID; takes ~15 min to propagate after approval). For now, use GPT-4o, GPT-5.5, or any Claude/Gemini model instead.`
+        : lower.includes("insufficient funds") || lower.includes("insufficient_funds")
+          ? envVar
+            ? `${parsed.data.model} routed through the Vercel AI Gateway, which is out of credit. Fix: either (1) add ${envVar} to your Vercel project environment variables to route this model directly, OR (2) top up the AI Gateway at vercel.com → AI Gateway → Top up.`
+            : `${parsed.data.model} routed through the Vercel AI Gateway, which is out of credit. Top up the gateway, or pick a different model.`
+          : rawMessage.includes("did not match schema")
+            ? "분석할 수 없는 형식입니다. 학술 자료가 아닌, 실제 사건의 사실관계(당사자, 청구원인, 일시 등)를 포함하여 입력해 주세요. / The input doesn't look like a case — please include real party facts, claims, and dates."
+            : rawMessage.includes("could not parse")
+              ? "모델이 유효한 JSON을 반환하지 못했습니다. 다른 모델로 다시 시도해 주세요. / Model returned unparseable output — try a different model."
+              : rawMessage;
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
