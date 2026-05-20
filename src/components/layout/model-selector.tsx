@@ -30,6 +30,10 @@ const FAMILY_GLYPH: Record<
     letter: "✦",
     classes: "bg-gradient-to-br from-indigo-500 to-violet-600 text-white",
   },
+  groq: {
+    letter: "⚡",
+    classes: "bg-gradient-to-br from-emerald-400 to-teal-600 text-white",
+  },
   anthropic: { letter: "A", classes: "bg-orange-100 text-orange-700" },
   openai: { letter: "O", classes: "bg-emerald-100 text-emerald-700" },
   google: { letter: "G", classes: "bg-blue-100 text-blue-700" },

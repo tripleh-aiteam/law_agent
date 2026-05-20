@@ -31,7 +31,8 @@ export type ModelFamily =
   | "xai"
   | "deepseek"
   | "meta"
-  | "mistral";
+  | "mistral"
+  | "groq";
 
 export type ModelTier = "premium" | "balanced" | "fast";
 
@@ -54,49 +55,102 @@ export interface ModelOption {
 export const MOA_MODEL_ID = "auto/mixture-of-agents";
 
 /**
- * The candidate roster for Mixture-of-Agents. FOUR viewpoint-diverse, mostly
- * cost-efficient models so the candidate fan-out stays affordable; the
- * aggregator (a single more expensive call) carries the heavy meta-reasoning.
- *   1. Claude Sonnet 4.6   — Anthropic's balanced model. Excellent Korean
- *                            legal nuance at ~1/5 of Opus cost.
- *   2. Claude Haiku 4.5    — Fastest Anthropic. Different tier from Sonnet,
- *                            so even though same family they catch different
- *                            things.
- *   3. xAI Grok 4.3        — Contrarian viewpoint. Different training axis
- *                            from the OpenAI/Anthropic mainstream.
- *   4. DeepSeek V4 Pro     — Surprisingly strong Korean (CJK-trained), very
- *                            cheap, fully cross-vendor.
+ * The candidate roster for Mixture-of-Agents. Currently configured for
+ * FREE MODE — every entry runs on a free-tier provider so MoA queries
+ * cost $0 until the user tops up their Vercel AI Gateway credit.
  *
- * The aggregator below is FULLY cross-vendor from this roster (OpenAI),
- * which removes the self-bias risk of an Anthropic model judging itself.
+ *   1. Groq Llama 3.3 70B   — Meta Llama, Groq's free tier. Very fast.
+ *   2. Groq Llama 4 Scout   — Newer Meta variant, multimodal. Free.
+ *   3. Google Gemini 2.5 Flash — Direct Google AI Studio (1,500 RPD free).
+ *   4. Groq Qwen 3 32B      — Alibaba Qwen, different family. Free.
+ *
+ * All run via DIRECT provider keys, NOT the Vercel AI Gateway, so they
+ * don't draw from the (currently empty) gateway credit balance.
  */
 export const MOA_ROSTER: readonly string[] = [
-  "anthropic/claude-sonnet-4.6",
-  "anthropic/claude-haiku-4.5",
-  "xai/grok-4.3",
-  "deepseek/deepseek-v4-pro",
+  "groq/llama-3.3-70b-versatile",
+  "groq/meta-llama/llama-4-scout-17b-16e-instruct",
+  "google/gemini-2.5-flash",
+  "groq/qwen/qwen3-32b",
 ];
 
 /**
  * The aggregator model that synthesizes the candidate outputs.
- * GPT-5.5 — different vendor from every candidate (Anthropic/xAI/DeepSeek),
- * so the meta-judgment is genuinely neutral. Reliable JSON, strong Korean
- * legal reasoning, sensible cost for the single-call aggregator role.
+ * FREE MODE: Groq's openai/gpt-oss-120b — a large open-weight OpenAI-style
+ * model running on Groq's free tier. Strong meta-reasoning at $0.
+ * Different family from every candidate, so no self-bias.
  */
-export const MOA_AGGREGATOR_MODEL_ID = "openai/gpt-5.5";
+export const MOA_AGGREGATOR_MODEL_ID = "groq/openai/gpt-oss-120b";
 
 /** Selectable models. Order matters — the UI renders them in this order. */
 export const MODEL_OPTIONS: ModelOption[] = [
   // ─── Mixture-of-Agents (pinned to the top of the selector) ─────────
   {
     id: MOA_MODEL_ID,
-    displayName: "Mixture-of-Agents",
+    displayName: "Mixture-of-Agents (FREE)",
     family: "auto",
     tier: "premium",
     description:
-      "4 diverse candidates (Sonnet 4.6 + Haiku 4.5 + Grok 4.3 + DeepSeek V4 Pro) run in parallel, then GPT-5.5 synthesizes a neutral cross-vendor judgment. Higher quality + lower self-bias than any single model.",
-    korean: 5,
+      "FREE MODE: 4 free-tier candidates (Llama 3.3 70B + Llama 4 Scout + Gemini 2.5 Flash + Qwen 3) run in parallel, then GPT-OSS 120B synthesizes. Routes via direct Groq + Google free APIs, NOT the paid gateway. $0/query.",
+    korean: 4,
   },
+  // ─── Groq (FREE TIER — direct API, bypasses paid gateway) ──────────
+  // Groq's free tier serves these open-weight models at very high speed
+  // (~500 tok/s). Rate limits are generous enough for normal use.
+  {
+    id: "groq/llama-3.3-70b-versatile",
+    displayName: "Llama 3.3 70B",
+    family: "groq",
+    tier: "balanced",
+    description:
+      "FREE via Groq direct API. Meta's strong general model — ~500 tok/s. Decent Korean, no gateway cost.",
+    korean: 3,
+  },
+  {
+    id: "groq/meta-llama/llama-4-scout-17b-16e-instruct",
+    displayName: "Llama 4 Scout",
+    family: "groq",
+    tier: "fast",
+    description:
+      "FREE via Groq. Newer Meta Llama 4 Scout, multimodal-capable. Fast.",
+    korean: 3,
+  },
+  {
+    id: "groq/llama-3.1-8b-instant",
+    displayName: "Llama 3.1 8B Instant",
+    family: "groq",
+    tier: "fast",
+    description:
+      "FREE via Groq. Tiny + extremely fast (~800 tok/s). Good for short queries.",
+    korean: 3,
+  },
+  {
+    id: "groq/qwen/qwen3-32b",
+    displayName: "Qwen 3 32B",
+    family: "groq",
+    tier: "balanced",
+    description:
+      "FREE via Groq. Alibaba Qwen — strong CJK (Korean / Chinese / Japanese) for an open model.",
+    korean: 4,
+  },
+  {
+    id: "groq/openai/gpt-oss-120b",
+    displayName: "GPT-OSS 120B",
+    family: "groq",
+    tier: "balanced",
+    description:
+      "FREE via Groq. OpenAI's open-weight 120B model. Strong reasoning, useful as a free aggregator.",
+    korean: 3,
+  },
+  {
+    id: "groq/openai/gpt-oss-20b",
+    displayName: "GPT-OSS 20B",
+    family: "groq",
+    tier: "fast",
+    description: "FREE via Groq. Smaller open-weight OpenAI model.",
+    korean: 3,
+  },
+
   // ─── Anthropic Claude ───────────────────────────────────────────────
   {
     id: "anthropic/claude-opus-4.7",
@@ -410,8 +464,17 @@ export const MODEL_OPTIONS: ModelOption[] = [
   },
 ];
 
-/** Default model — used when the user hasn't selected one yet. */
-export const DEFAULT_MODEL_ID = "anthropic/claude-sonnet-4.6";
+/**
+ * Default model — used when the user hasn't selected one yet.
+ *
+ * FREE MODE: Gemini 2.5 Flash via direct Google AI Studio API. The user's
+ * Vercel AI Gateway credit is empty; this default avoids the gateway
+ * entirely while still giving solid Korean legal handling at $0.
+ *
+ * When the user tops up gateway credit, switch this back to
+ * "anthropic/claude-sonnet-4.6" for the previous default.
+ */
+export const DEFAULT_MODEL_ID = "google/gemini-2.5-flash";
 
 const MODEL_BY_ID = new Map(MODEL_OPTIONS.map((m) => [m.id, m]));
 
@@ -470,6 +533,7 @@ export function isMoaModelId(id: string | null | undefined): boolean {
 /** Family display order + labels for the selector UI. */
 export const FAMILY_LABELS: Record<ModelFamily, { ko: string; en: string }> = {
   auto: { ko: "자동 (앙상블)", en: "Auto (Ensemble)" },
+  groq: { ko: "Groq (무료)", en: "Groq (Free)" },
   anthropic: { ko: "Anthropic Claude", en: "Anthropic Claude" },
   openai: { ko: "OpenAI", en: "OpenAI" },
   xai: { ko: "xAI Grok", en: "xAI Grok" },

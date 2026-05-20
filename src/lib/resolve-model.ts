@@ -1,24 +1,29 @@
 /**
  * Resolves a user-selected model ID into either:
- *   1. A gateway-form string ("anthropic/claude-opus-4-7") routed via the
- *      Vercel AI Gateway when AI_GATEWAY_API_KEY is set (preferred), OR
- *   2. A direct-provider model instance (e.g. `anthropic("claude-opus-4-7")`)
- *      when the gateway key is absent but a direct provider key is set.
+ *   1. A direct-provider model instance (e.g. `groq("llama-3.3-70b-...")`)
+ *      when the matching direct-provider key is set — PREFERRED.
+ *   2. A gateway-form string ("anthropic/claude-opus-4.7") routed via the
+ *      Vercel AI Gateway when no direct key is available.
  *
- * Why gateway-first:
- *   - More forgiving structured-output normalization. Direct Anthropic with
- *     complex zod schemas sometimes returns valid JSON that fails zod
- *     validation; the gateway's compatibility layer smooths this over.
- *   - Single billing surface (Vercel Pro credits) instead of per-provider.
- *   - One code path to debug instead of N.
+ * Why direct-first (changed Nov 2026):
+ *   - The Vercel AI Gateway requires prepaid credits in a separate balance
+ *     from the Pro plan's $20 included credit. When that balance hits $0,
+ *     the gateway returns 402 "insufficient funds" and every call fails.
+ *   - Going direct (Anthropic / OpenAI / Google / Groq) uses each provider's
+ *     own billing — including FREE tiers (Groq 1000+ rpd, Gemini 1500 rpd)
+ *     which keep the app working at $0 even when the gateway is empty.
+ *   - The previous "gateway first for JSON-schema normalization" rationale
+ *     is mooted by our retry-on-parse-fail logic in moa.ts and extractor.ts.
  *
- * Direct providers are kept as a fallback so the agent still works on
- * deployments without AI_GATEWAY_API_KEY (e.g. local development on a
- * laptop without Vercel credentials).
+ * The gateway is still used for families without a direct provider in the
+ * project (xAI, DeepSeek, Meta, Mistral) — they'll fail with a clear
+ * "insufficient funds" message if the gateway is empty, telling the user
+ * to top up or pick a different model.
  */
 import { anthropic } from "@ai-sdk/anthropic";
 import { openai } from "@ai-sdk/openai";
 import { google } from "@ai-sdk/google";
+import { groq } from "@ai-sdk/groq";
 import type { LanguageModel } from "ai";
 import { MODEL_OPTIONS, type ModelOption } from "./models";
 
@@ -57,12 +62,13 @@ export function resolveModelForUse(
 
   const modelName = modelNameFromId(opt.id);
 
-  // Prefer gateway routing — more reliable JSON-schema normalization.
-  if (hasEnv("AI_GATEWAY_API_KEY")) {
-    return opt.id;
+  // ── PREFER DIRECT PROVIDERS ───────────────────────────────────────
+  // Each provider has its own billing surface. Going direct uses the
+  // user's separate Anthropic/OpenAI/Google/Groq accounts — including
+  // their free tiers when available. The gateway is the LAST resort.
+  if (opt.family === "groq" && hasEnv("GROQ_API_KEY")) {
+    return groq(modelName);
   }
-
-  // No gateway → fall back to direct provider when its key is configured.
   if (opt.family === "anthropic" && hasEnv("ANTHROPIC_API_KEY")) {
     return anthropic(modelName);
   }
@@ -72,13 +78,16 @@ export function resolveModelForUse(
   if (opt.family === "google" && hasEnv("GOOGLE_GENERATIVE_AI_API_KEY")) {
     return google(modelName);
   }
-  // xAI / DeepSeek / Meta / Moonshot / Mistral / auto are only reachable
-  // via the Vercel AI Gateway — we don't ship direct providers for them
-  // because that would require shipping their SDKs + per-provider keys.
-  // If the user picks one without AI_GATEWAY_API_KEY set, returning the
-  // gateway-form id below produces a clean "no API key" error downstream.
 
-  // No keys configured at all — return the gateway string as a last resort
-  // (will fail with a clear "no API key" error downstream).
+  // ── GATEWAY FALLBACK ──────────────────────────────────────────────
+  // xAI / DeepSeek / Meta / Mistral only reach via the gateway (we don't
+  // ship those SDKs in the project). When the gateway is out of funds,
+  // these will fail with a clear 402 error and the user will see the
+  // "insufficient funds" message in their turn.
+  if (hasEnv("AI_GATEWAY_API_KEY")) {
+    return opt.id;
+  }
+
+  // No keys configured at all — return the gateway string as a last resort.
   return opt.id;
 }
