@@ -340,6 +340,9 @@ function BranchBody({
   const [showDetails, setShowDetails] = React.useState(false);
 
   if (branch.status === "pending") {
+    // Manus is an autonomous agent — its tasks take MINUTES, not seconds.
+    // Surface that expectation so users don't think the app froze.
+    const isManusBranch = resolveModel(branch.modelId).family === "manus";
     return (
       <div className="rounded-2xl rounded-tl-md border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600 shadow-sm">
         <div className="flex items-center gap-2">
@@ -349,6 +352,11 @@ function BranchBody({
           </span>
           <ElapsedCounter startedAt={branch.startedAt} />
         </div>
+        {isManusBranch && (
+          <p className="mt-1.5 text-[12px] text-purple-700">
+            {t("manusSlowHint")}
+          </p>
+        )}
       </div>
     );
   }

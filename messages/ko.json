@@ -163,7 +163,8 @@
     "nModelsComparing": "{count}개 모델 비교",
     "markBest": "최고 답으로 표시",
     "unmarkBest": "표시 해제",
-    "bestAnswer": "★ 최고 답"
+    "bestAnswer": "★ 최고 답",
+    "manusSlowHint": "Manus는 웹 검색 + 다단계 추론을 수행하는 자율 에이전트입니다. 일반 LLM과 달리 5–30분이 소요될 수 있습니다."
   },
   "chips": {
     "summarize": {

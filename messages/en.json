@@ -163,7 +163,8 @@
     "nModelsComparing": "comparing {count} models",
     "markBest": "Mark as best",
     "unmarkBest": "Unmark",
-    "bestAnswer": "★ Best answer"
+    "bestAnswer": "★ Best answer",
+    "manusSlowHint": "Manus is an autonomous agent — it browses the web + runs multi-step reasoning. Unlike a regular LLM, this can take 5–30 minutes."
   },
   "chips": {
     "summarize": {

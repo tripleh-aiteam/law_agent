@@ -14,7 +14,7 @@
  * works for direct AND gateway paths (resolve-model.ts handles routing).
  */
 
-export type ModelFamily = "anthropic" | "openai" | "google";
+export type ModelFamily = "anthropic" | "openai" | "google" | "manus";
 
 export type ModelTier = "premium" | "balanced" | "fast";
 
@@ -97,6 +97,23 @@ export const MODEL_OPTIONS: ModelOption[] = [
     tier: "premium",
     description:
       "Google's flagship preview. Different vendor than Anthropic/OpenAI — cross-checks the dominant axis. Needs GOOGLE_GENERATIVE_AI_API_KEY on Vercel. ~$0.04/query.",
+    korean: 4,
+    experimental: true,
+  },
+
+  // ─── Manus (autonomous agent — different beast entirely) ─────────────
+  // Not just an LLM: Manus is a full autonomous agent that browses the web,
+  // executes code, and produces multi-step research reports. It runs ASYNC
+  // (5–30 min per task) and costs much more than a plain LLM call
+  // (~$0.50–$5 per task vs. ~$0.05 for Claude). Use it when you want
+  // research that goes beyond what's in our local 판례 corpus.
+  {
+    id: "manus/agent",
+    displayName: "Manus (autonomous agent)",
+    family: "manus",
+    tier: "premium",
+    description:
+      "Full autonomous agent — browses the web, drafts reports, runs multi-step research. SLOW (5–30 min per task) and EXPENSIVE (~$0.50–$5/query). Use for hard cases that need live court-case research, not for routine queries. Needs MANUS_API_KEY on Vercel.",
     korean: 4,
     experimental: true,
   },
@@ -207,6 +224,7 @@ export const FAMILY_LABELS: Record<ModelFamily, { ko: string; en: string }> = {
   anthropic: { ko: "Claude", en: "Claude" },
   openai: { ko: "ChatGPT", en: "ChatGPT" },
   google: { ko: "Gemini", en: "Gemini" },
+  manus: { ko: "Manus", en: "Manus" },
 };
 
 export const TIER_LABELS: Record<ModelTier, { ko: string; en: string }> = {
