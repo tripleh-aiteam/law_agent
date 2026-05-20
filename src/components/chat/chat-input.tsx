@@ -356,6 +356,7 @@ export function ChatInput() {
   const tCommon = useTranslations("common");
   const locale = useLocale();
   const {
+    currentCase,
     currentCaseId,
     createCase,
     selectCase,
@@ -502,24 +503,73 @@ export function ChatInput() {
     setAttachments((prev) => prev.filter((a) => a.id !== id));
   }, []);
 
-  /** Build the narrative sent to /api/extract by combining the user's
-   *  question (the textarea text) with the attached files. The user's
-   *  question is placed FIRST and clearly labeled so the LLM treats it
-   *  as the primary signal, with files as supplementary context. */
+  /** Build the narrative sent to /api/extract by combining:
+   *   1. context from the most recent completed turn (so short follow-ups
+   *      like "why?" have meaning),
+   *   2. the user's current question (the textarea text),
+   *   3. any newly attached files.
+   *  Order matters: prior context first, then the live question, then files.
+   *  The LLM treats the current question as the primary signal and uses
+   *  prior context to interpret it.
+   *
+   *  Token budget: we include the prior turn's SUMMARY (small) plus its
+   *  narrative (could be large — a multi-MB PDF). The extractor's
+   *  `trimMiddle` cap downstream prevents runaway token cost.
+   */
   const buildNarrative = React.useCallback(
     (question: string, currentAttachments: Attachment[]): string => {
       const q = question.trim();
       const ready = currentAttachments.filter(
         (a) => a.status === "ready" && a.text.length > 0,
       );
-      if (ready.length === 0) return q;
       const fileBlocks = ready
         .map((a) => `[첨부파일 / Attached file: ${a.filename}]\n${a.text}`)
         .join("\n\n---\n\n");
-      if (!q) return fileBlocks;
-      return `[사용자 질의 / User question]\n${q}\n\n---\n\n${fileBlocks}`;
+
+      // Find the most recent completed turn to use as conversation context.
+      const priorTurns = currentCase?.turns ?? [];
+      const lastCompleted = [...priorTurns]
+        .reverse()
+        .find((t) => t.status === "complete");
+
+      const sections: string[] = [];
+
+      if (lastCompleted) {
+        // Multi-turn follow-up — give the LLM the prior context so a short
+        // question like "why?" or "more detail" has something to refer to.
+        const contextBlock: string[] = [
+          "[이전 대화 / Prior conversation]",
+        ];
+        if (lastCompleted.narrative) {
+          contextBlock.push(
+            `이전 사건 사실관계 / Previous case context:\n${lastCompleted.narrative}`,
+          );
+        }
+        if (lastCompleted.question) {
+          contextBlock.push(
+            `이전 질문 / Previous question: ${lastCompleted.question}`,
+          );
+        }
+        if (lastCompleted.summary) {
+          contextBlock.push(
+            `이전 분석 요약 / Previous analysis summary:\n${lastCompleted.summary}`,
+          );
+        }
+        sections.push(contextBlock.join("\n\n"));
+      }
+
+      if (q) {
+        sections.push(
+          lastCompleted
+            ? `[현재 후속 질문 / Current follow-up question]\n${q}`
+            : `[사용자 질의 / User question]\n${q}`,
+        );
+      }
+      if (fileBlocks) sections.push(fileBlocks);
+
+      return sections.join("\n\n---\n\n");
     },
-    [],
+    [currentCase],
   );
 
   const onPickFiles = () => {
@@ -616,9 +666,18 @@ export function ChatInput() {
 
   // ---------- Send pipeline ----------
   const hasReadyAttachments = attachments.some((a) => a.status === "ready");
-  // Allow sending if the user typed >= 10 chars OR has at least one ready file.
+  // Does this case already have at least one completed turn? If so, the
+  // user is sending a FOLLOW-UP — buildNarrative will splice prior context
+  // in, so the new question can be as short as "why?" or "more". For a
+  // brand-new case with no prior turns, we still want some context (10
+  // chars min) so the extractor has something to reason about.
+  const hasPriorTurns = (currentCase?.turns ?? []).some(
+    (t) => t.status === "complete",
+  );
+  const minChars = hasPriorTurns ? 1 : 10;
   const canSend =
-    !isSending && (value.trim().length >= 10 || hasReadyAttachments);
+    !isSending &&
+    (value.trim().length >= minChars || hasReadyAttachments);
 
   const onStop = () => {
     // Synchronously abort the in-flight fetches. The catch block in onSend
@@ -857,7 +916,9 @@ export function ChatInput() {
           placeholder={
             attachments.length > 0
               ? tChat("placeholderWithFiles")
-              : tChat("placeholder")
+              : hasPriorTurns
+                ? tChat("placeholderFollowUp")
+                : tChat("placeholder")
           }
           rows={4}
           className="block w-full resize-none rounded-2xl bg-transparent px-5 pt-5 pb-2 text-[16px] font-medium leading-relaxed text-slate-900 outline-none placeholder:font-normal placeholder:text-slate-400"
