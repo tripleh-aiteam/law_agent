@@ -5,6 +5,7 @@ import { useLocale, useTranslations } from "next-intl";
 import { Globe, Settings2 } from "lucide-react";
 
 import { useCases } from "@/components/cases/cases-context";
+import { ModelSelector } from "@/components/layout/model-selector";
 import { usePathname, useRouter } from "@/i18n/navigation";
 
 export function Header() {
@@ -75,6 +76,7 @@ export function Header() {
         )}
       </div>
       <div className="flex items-center gap-1.5">
+        <ModelSelector />
         <button
           type="button"
           onClick={toggleLocale}

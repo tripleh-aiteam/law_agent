@@ -10,6 +10,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 
 import type { CitabilityTier, LegalElements, PrecedentMatch } from "@/lib/types";
+import { useCases } from "@/components/cases/cases-context";
 
 /**
  * 3-tier citability badge.
@@ -115,6 +116,7 @@ function WhyAccordionItem({
 }): React.ReactElement {
   const t = useTranslations("dashboard.why");
   const tResults = useTranslations("results");
+  const { selectedModelId } = useCases();
 
   const [open, setOpen] = React.useState<boolean>(defaultOpen);
   const [state, setState] = React.useState<FetchState>(() => {
@@ -128,7 +130,7 @@ function WhyAccordionItem({
       const res = await fetch("/api/case/why", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ narrative, elements, match, locale }),
+        body: JSON.stringify({ narrative, elements, match, locale, model: selectedModelId ?? undefined }),
       });
       if (!res.ok) {
         const { error } = (await res.json().catch(() => ({ error: "Request failed" }))) as {
@@ -143,7 +145,7 @@ function WhyAccordionItem({
       const message = err instanceof Error ? err.message : "Unknown error";
       setState({ status: "error", error: message });
     }
-  }, [narrative, elements, match, locale, itemCacheKey]);
+  }, [narrative, elements, match, locale, itemCacheKey, selectedModelId]);
 
   // Lazy-load when the item first opens.
   React.useEffect(() => {

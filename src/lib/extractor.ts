@@ -2,6 +2,7 @@ import { generateObject } from "ai";
 import { z } from "zod";
 import { LegalElementsSchema, type LegalElements, type ClarifyingQuestion } from "./types";
 import { EXTRACTION_MODEL } from "./ai";
+import { safeModelId } from "./models";
 
 /**
  * Schema used for the extraction call. We extend LegalElementsSchema with a
@@ -63,7 +64,8 @@ const TIMEOUT_MS = 45_000;
  */
 export async function extractLegalElements(
   narrative: string,
-  locale: "ko" | "en"
+  locale: "ko" | "en",
+  modelId?: string,
 ): Promise<{ elements: LegalElements; clarifyingQuestions: ClarifyingQuestion[] }> {
   const userPrompt = [
     `User locale (for clarifyingQuestions only): ${locale === "ko" ? "Korean (한국어)" : "English"}`,
@@ -76,8 +78,12 @@ export async function extractLegalElements(
     "Extract the legal elements in Korean. Write clarifyingQuestions in the user locale above.",
   ].join("\n");
 
+  // If the caller passes a model ID, route via AI Gateway (string form).
+  // Otherwise fall back to the default direct-Groq EXTRACTION_MODEL.
+  const model = modelId ? safeModelId(modelId) : EXTRACTION_MODEL;
+
   const result = await generateObject({
-    model: EXTRACTION_MODEL,
+    model,
     schema: ExtractionResponseSchema,
     system: SYSTEM_PROMPT,
     prompt: userPrompt,

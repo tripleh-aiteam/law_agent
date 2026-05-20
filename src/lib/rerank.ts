@@ -2,6 +2,7 @@ import { generateObject } from "ai";
 import { z } from "zod";
 import type { LegalElements, Precedent, PrecedentMatch } from "./types";
 import { RERANK_MODEL } from "./ai";
+import { safeModelId } from "./models";
 
 /* ----------------------------- heuristic layer ----------------------------- */
 
@@ -185,10 +186,13 @@ export async function llmReranker(
   narrative: string,
   elements: LegalElements,
   candidates: RerankCandidate[],
-  locale: "ko" | "en"
+  locale: "ko" | "en",
+  modelId?: string,
 ): Promise<PrecedentMatch[]> {
   const top = candidates.slice(0, 6);
   const localeLabel = locale === "ko" ? "Korean (한국어)" : "English";
+  // Caller-selected model overrides the default RERANK_MODEL.
+  const model = modelId ? safeModelId(modelId) : RERANK_MODEL;
 
   const analyses = await Promise.all(
     top.map(async (c): Promise<{ analysis: PerCandidateAnalysis | null; heuristic: ReturnType<typeof elementOverlapScore> }> => {
@@ -226,7 +230,7 @@ export async function llmReranker(
 
       try {
         const { object } = await generateObject({
-          model: RERANK_MODEL,
+          model,
           schema: PerCandidateAnalysisSchema,
           system: RERANK_SYSTEM_PROMPT,
           prompt: userPrompt,

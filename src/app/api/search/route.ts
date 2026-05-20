@@ -18,6 +18,8 @@ const BodySchema = z.object({
   narrative: z.string().min(10),
   elements: LegalElementsSchema,
   locale: z.enum(["ko", "en"]),
+  /** Optional gateway model ID — passed through to the LLM rerank step. */
+  model: z.string().optional(),
 });
 
 export async function POST(req: Request): Promise<Response> {
@@ -36,7 +38,7 @@ export async function POST(req: Request): Promise<Response> {
     );
   }
 
-  const { narrative, elements, locale } = parsed.data;
+  const { narrative, elements, locale, model } = parsed.data;
 
   try {
     const [corpus, embeddings] = await Promise.all([loadCorpus(), loadCorpusEmbeddings()]);
@@ -52,7 +54,7 @@ export async function POST(req: Request): Promise<Response> {
       return NextResponse.json({ matches: [] });
     }
 
-    const reranked = await llmReranker(narrative, elements, top10, locale);
+    const reranked = await llmReranker(narrative, elements, top10, locale, model);
 
     // Verify citations in parallel. Failures degrade to verified=false.
     const verified = await Promise.all(

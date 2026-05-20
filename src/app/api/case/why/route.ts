@@ -3,6 +3,7 @@ import { generateObject } from "ai";
 import { z } from "zod";
 import { LegalElementsSchema, PrecedentSchema } from "@/lib/types";
 import { EXTRACTION_MODEL } from "@/lib/ai";
+import { safeModelId } from "@/lib/models";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -28,6 +29,7 @@ const BodySchema = z.object({
   elements: LegalElementsSchema,
   match: PrecedentMatchSchema,
   locale: z.enum(["ko", "en"]),
+  model: z.string().optional(),
 });
 
 const WhySchema = z.object({
@@ -131,8 +133,9 @@ export async function POST(req: Request): Promise<Response> {
   ].join("\n");
 
   try {
+    const model = parsed.data.model ? safeModelId(parsed.data.model) : EXTRACTION_MODEL;
     const result = await generateObject({
-      model: EXTRACTION_MODEL,
+      model,
       schema: WhySchema,
       system: SYSTEM_PROMPT,
       prompt: userPrompt,

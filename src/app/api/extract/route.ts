@@ -8,6 +8,8 @@ export const maxDuration = 60;
 const BodySchema = z.object({
   narrative: z.string().min(10, "narrative must be at least 10 characters"),
   locale: z.enum(["ko", "en"]),
+  /** Optional gateway model ID (e.g. "anthropic/claude-opus-4-7"). Validated downstream. */
+  model: z.string().optional(),
 });
 
 export async function POST(req: Request): Promise<Response> {
@@ -29,7 +31,8 @@ export async function POST(req: Request): Promise<Response> {
   try {
     const { elements, clarifyingQuestions } = await extractLegalElements(
       parsed.data.narrative,
-      parsed.data.locale
+      parsed.data.locale,
+      parsed.data.model,
     );
     return NextResponse.json({ elements, clarifyingQuestions });
   } catch (err: unknown) {

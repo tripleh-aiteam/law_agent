@@ -169,6 +169,8 @@
     "newCase": "새 사건",
     "renameCase": "사건 이름 변경",
     "toggleLocale": "언어 전환",
-    "settings": "설정"
+    "settings": "설정",
+    "modelSelector": "AI 모델 선택",
+    "modelSelectorHint": "분석 품질에 영향을 줍니다. Premium 모델일수록 한국어 법률 추론이 정교합니다."
   }
 }

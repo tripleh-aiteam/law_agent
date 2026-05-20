@@ -30,6 +30,8 @@ const STORAGE_KEY = "law-agent:cases";
 type StoredState = {
   folders: Folder[];
   currentCaseId: string | null;
+  /** AI model selected for LLM tasks (extract / search rerank / dashboard). */
+  selectedModelId: string | null;
 };
 
 type CasesContextValue = {
@@ -38,6 +40,10 @@ type CasesContextValue = {
   currentCase: CaseFile | null;
   /** Folder ID of the parent folder of the currently-selected case (null if none). */
   currentFolderId: string | null;
+  /** Currently-selected LLM model ID (e.g. "anthropic/claude-opus-4-7"). */
+  selectedModelId: string | null;
+  /** Setter for the selected model — persists to localStorage. */
+  setSelectedModelId: (modelId: string) => void;
   createFolder: (parentFolderId?: string | null, name?: string) => string;
   deleteFolder: (folderId: string) => void;
   renameFolder: (folderId: string, name: string) => void;
@@ -92,21 +98,22 @@ function migrateFolders(folders: Folder[]): Folder[] {
 
 function loadInitial(): StoredState {
   if (typeof window === "undefined") {
-    return { folders: [], currentCaseId: null };
+    return { folders: [], currentCaseId: null, selectedModelId: null };
   }
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return { folders: [], currentCaseId: null };
+    if (!raw) return { folders: [], currentCaseId: null, selectedModelId: null };
     const parsed = JSON.parse(raw) as StoredState;
     if (!parsed || !Array.isArray(parsed.folders)) {
-      return { folders: [], currentCaseId: null };
+      return { folders: [], currentCaseId: null, selectedModelId: null };
     }
     return {
       folders: migrateFolders(parsed.folders),
       currentCaseId: parsed.currentCaseId ?? null,
+      selectedModelId: parsed.selectedModelId ?? null,
     };
   } catch {
-    return { folders: [], currentCaseId: null };
+    return { folders: [], currentCaseId: null, selectedModelId: null };
   }
 }
 
@@ -249,6 +256,7 @@ export function CasesProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = React.useState<StoredState>({
     folders: [],
     currentCaseId: null,
+    selectedModelId: null,
   });
   const [hydrated, setHydrated] = React.useState(false);
 
@@ -290,6 +298,7 @@ export function CasesProvider({ children }: { children: React.ReactNode }) {
       }
       if (target) walk(target);
       return {
+        ...s,
         folders: removeFolder(s.folders, folderId),
         currentCaseId:
           s.currentCaseId && removedIds.has(s.currentCaseId)
@@ -321,7 +330,7 @@ export function CasesProvider({ children }: { children: React.ReactNode }) {
       };
       setState((s) => {
         const { folders } = addCaseTo(s.folders, folderId, newCase);
-        return { folders, currentCaseId: id };
+        return { ...s, folders, currentCaseId: id };
       });
       return id;
     },
@@ -330,6 +339,7 @@ export function CasesProvider({ children }: { children: React.ReactNode }) {
 
   const deleteCase = React.useCallback((caseId: string) => {
     setState((s) => ({
+      ...s,
       folders: removeCaseFromTree(s.folders, caseId),
       currentCaseId: s.currentCaseId === caseId ? null : s.currentCaseId,
     }));
@@ -380,11 +390,17 @@ export function CasesProvider({ children }: { children: React.ReactNode }) {
     [state.folders, state.currentCaseId],
   );
 
+  const setSelectedModelId = React.useCallback((modelId: string) => {
+    setState((s) => ({ ...s, selectedModelId: modelId }));
+  }, []);
+
   const value: CasesContextValue = {
     folders: state.folders,
     currentCaseId: state.currentCaseId,
     currentCase,
     currentFolderId,
+    selectedModelId: state.selectedModelId,
+    setSelectedModelId,
     createFolder,
     deleteFolder,
     renameFolder,

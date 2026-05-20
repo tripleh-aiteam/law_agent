@@ -3,6 +3,7 @@ import { generateObject } from "ai";
 import { z } from "zod";
 import { LegalElementsSchema } from "@/lib/types";
 import { EXTRACTION_MODEL } from "@/lib/ai";
+import { safeModelId } from "@/lib/models";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -11,6 +12,7 @@ const BodySchema = z.object({
   narrative: z.string().min(10, "narrative must be at least 10 characters"),
   elements: LegalElementsSchema,
   locale: z.enum(["ko", "en"]),
+  model: z.string().optional(),
 });
 
 const DetailedSchema = z.object({
@@ -110,8 +112,9 @@ export async function POST(req: Request): Promise<Response> {
   ].join("\n");
 
   try {
+    const model = parsed.data.model ? safeModelId(parsed.data.model) : EXTRACTION_MODEL;
     const result = await generateObject({
-      model: EXTRACTION_MODEL,
+      model,
       schema: DetailedSchema,
       system: SYSTEM_PROMPT,
       prompt: userPrompt,

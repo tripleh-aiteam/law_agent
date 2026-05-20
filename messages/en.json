@@ -169,6 +169,8 @@
     "newCase": "New case",
     "renameCase": "Rename case",
     "toggleLocale": "Toggle language",
-    "settings": "Settings"
+    "settings": "Settings",
+    "modelSelector": "AI Model",
+    "modelSelectorHint": "Affects analysis quality. Premium models reason more precisely about Korean legal nuance."
   }
 }

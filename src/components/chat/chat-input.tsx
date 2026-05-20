@@ -76,8 +76,14 @@ export function ChatInput() {
   const tChat = useTranslations("chat");
   const tCommon = useTranslations("common");
   const locale = useLocale();
-  const { currentCase, currentCaseId, createCase, updateCase, selectCase } =
-    useCases();
+  const {
+    currentCase,
+    currentCaseId,
+    createCase,
+    updateCase,
+    selectCase,
+    selectedModelId,
+  } = useCases();
 
   const [value, setValue] = React.useState("");
   const [phase, setPhase] = React.useState<Phase>("idle");
@@ -325,7 +331,7 @@ export function ChatInput() {
       const exRes = await fetch("/api/extract", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ narrative, locale }),
+        body: JSON.stringify({ narrative, locale, model: selectedModelId ?? undefined }),
       });
       if (!exRes.ok) throw new Error(`Extract failed: ${exRes.status}`);
       const exData = (await exRes.json()) as ExtractResponse;
@@ -340,6 +346,7 @@ export function ChatInput() {
           narrative,
           elements: exData.elements,
           locale,
+          model: selectedModelId ?? undefined,
         }),
       });
       if (!srRes.ok) throw new Error(`Search failed: ${srRes.status}`);

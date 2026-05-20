@@ -56,13 +56,14 @@ export default CaseDashboard;
 /* -------------------------------------------------------------------------- */
 
 function CaseDashboardFromContext({ fallback }: { fallback: CaseDashboardProps }): React.ReactElement {
-  const { currentCase } = useCases();
+  const { currentCase, selectedModelId } = useCases();
   return (
     <CaseDashboardBody
       caseFileId={currentCase?.id ?? fallback.caseFileId}
       narrative={currentCase?.narrative ?? fallback.narrative}
       elements={currentCase?.elements ?? fallback.elements}
       matches={currentCase?.matches ?? fallback.matches}
+      modelId={selectedModelId ?? undefined}
     />
   );
 }
@@ -117,7 +118,9 @@ function CaseDashboardBody({
   narrative,
   elements,
   matches,
-}: CaseDashboardProps): React.ReactElement {
+  modelId,
+}: CaseDashboardProps & { modelId?: string }): React.ReactElement {
+  const selectedModelId = modelId;
   const locale = useLocale() as Locale;
   const t = useTranslations("dashboard");
 
@@ -149,7 +152,7 @@ function CaseDashboardBody({
       const res = await fetch("/api/case/summarize", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ narrative, elements, locale }),
+        body: JSON.stringify({ narrative, elements, locale, model: selectedModelId ?? undefined }),
       });
       if (!res.ok) {
         const { error } = (await res.json().catch(() => ({ error: "Request failed" }))) as {
@@ -164,7 +167,7 @@ function CaseDashboardBody({
       const message = err instanceof Error ? err.message : "Unknown error";
       setSummary({ status: "error", error: message });
     }
-  }, [narrative, elements, locale, cacheKey]);
+  }, [narrative, elements, locale, cacheKey, selectedModelId]);
 
   const fetchDetailed = React.useCallback(async (): Promise<void> => {
     if (!narrative || !elements) return;
@@ -173,7 +176,7 @@ function CaseDashboardBody({
       const res = await fetch("/api/case/detailed", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ narrative, elements, locale }),
+        body: JSON.stringify({ narrative, elements, locale, model: selectedModelId ?? undefined }),
       });
       if (!res.ok) {
         const { error } = (await res.json().catch(() => ({ error: "Request failed" }))) as {
@@ -188,7 +191,7 @@ function CaseDashboardBody({
       const message = err instanceof Error ? err.message : "Unknown error";
       setDetailed({ status: "error", error: message });
     }
-  }, [narrative, elements, locale, cacheKey]);
+  }, [narrative, elements, locale, cacheKey, selectedModelId]);
 
   // Lazy-load: fire the network call the first time a tab is opened with data ready.
   React.useEffect(() => {
