@@ -159,14 +159,39 @@ export async function extractLegalElements(
     ? anySignal([clientSignal, AbortSignal.timeout(TIMEOUT_MS)])
     : AbortSignal.timeout(TIMEOUT_MS);
 
-  const result = await generateObject({
-    model,
-    schema: ExtractionResponseSchema,
-    system: SYSTEM_PROMPT,
-    prompt: userPrompt,
-    abortSignal,
-    maxOutputTokens: 2048,
-  });
+  // Attempt #1 with the standard system prompt. Models like Claude/GPT
+  // usually nail strict JSON schema on the first try.
+  const callOnce = (systemPrompt: string) =>
+    generateObject({
+      model,
+      schema: ExtractionResponseSchema,
+      system: systemPrompt,
+      prompt: userPrompt,
+      abortSignal,
+      // 4096 (up from 2048) — long Korean DOCX inputs occasionally
+      // truncated mid-JSON at 2048, surfacing as "could not parse".
+      maxOutputTokens: 4096,
+      temperature: 0,
+    });
+
+  let result: Awaited<ReturnType<typeof callOnce>>;
+  try {
+    result = await callOnce(SYSTEM_PROMPT);
+  } catch (err) {
+    // Gemini (and occasionally Claude on long inputs) sometimes wraps
+    // JSON in markdown fences or adds preamble text — both blow up
+    // generateObject's schema validation as "could not parse". Retry
+    // ONCE with a stricter "JSON only" suffix; don't retry on
+    // AbortError (user pressed Stop) or non-parse failures.
+    if (
+      isParseFailure(err) &&
+      !(err instanceof DOMException && err.name === "AbortError")
+    ) {
+      result = await callOnce(SYSTEM_PROMPT + STRICT_JSON_SUFFIX);
+    } else {
+      throw err;
+    }
+  }
 
   const { clarifyingQuestions, summary, ...elements } =
     result.object as ExtractionResponse;
@@ -176,3 +201,17 @@ export async function extractLegalElements(
     clarifyingQuestions: clarifyingQuestions as ClarifyingQuestion[],
   };
 }
+
+/** Retry-worthy errors: the model output couldn't fit the schema. */
+function isParseFailure(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  const m = err.message.toLowerCase();
+  return (
+    m.includes("could not parse") ||
+    m.includes("did not match schema") ||
+    m.includes("no object generated") ||
+    m.includes("validation failed")
+  );
+}
+
+const STRICT_JSON_SUFFIX = `\n\nIMPORTANT: Output ONLY valid JSON matching the schema. No markdown code fences. No preamble. No commentary. The very first character must be { and the very last must be }.`;
