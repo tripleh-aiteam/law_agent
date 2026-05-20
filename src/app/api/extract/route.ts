@@ -36,7 +36,28 @@ export async function POST(req: Request): Promise<Response> {
     );
     return NextResponse.json({ elements, clarifyingQuestions });
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : "Extraction failed";
+    // Log the full error to Vercel function logs so we can diagnose 500s.
+    console.error("[api/extract] failed:", {
+      message: err instanceof Error ? err.message : String(err),
+      name: err instanceof Error ? err.name : undefined,
+      modelRequested: parsed.data.model ?? "(default)",
+      narrativeLen: parsed.data.narrative.length,
+      locale: parsed.data.locale,
+      // AI SDK errors include a `cause` chain with the underlying API error.
+      cause:
+        err && typeof err === "object" && "cause" in err
+          ? String((err as { cause: unknown }).cause).slice(0, 500)
+          : undefined,
+    });
+    const rawMessage =
+      err instanceof Error ? err.message : "Extraction failed";
+    // Friendlier message for the most common case (schema mismatch on
+    // non-case inputs like academic articles or random text).
+    const message = rawMessage.includes("did not match schema")
+      ? "분석할 수 없는 형식입니다. 학술 자료가 아닌, 실제 사건의 사실관계(당사자, 청구원인, 일시 등)를 포함하여 입력해 주세요. / The input doesn't look like a case — please include real party facts, claims, and dates."
+      : rawMessage.includes("could not parse")
+        ? "모델이 유효한 JSON을 반환하지 못했습니다. 다른 모델(예: Claude Opus 4.7)로 다시 시도해 주세요. / Model returned unparseable output — try a different model (e.g. Claude Opus 4.7)."
+        : rawMessage;
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
