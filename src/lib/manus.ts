@@ -162,28 +162,66 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 /**
  * Poll a task until it reaches a terminal status (completed / failed /
  * cancelled) OR we hit POLL_MAX_MS — whichever comes first.
+ *
+ * The first poll uses retry-with-backoff because Manus has shown
+ * propagation lag: a freshly-created task can return "task not found"
+ * (gRPC code 5) on the first read from a different region/datacenter
+ * than the one that created it. After ~3-5s the task becomes readable
+ * everywhere. Subsequent polls don't retry — by then any "not found"
+ * is a real bug.
  */
 export async function waitForCompletion(
   taskId: string,
   signal?: AbortSignal,
 ): Promise<ManusGetResponse> {
   const deadline = Date.now() + POLL_MAX_MS;
+  let firstPoll = true;
   while (true) {
-    const task = await getTask(taskId, signal);
+    let task: ManusGetResponse;
+    try {
+      task = await getTask(taskId, signal);
+    } catch (err) {
+      // Retry the FIRST poll only, with backoff, if Manus returns
+      // "task not found" — that's the propagation-lag signature.
+      if (firstPoll && isManusNotFoundError(err)) {
+        for (const delay of [1500, 3000, 5000]) {
+          await sleep(delay, signal);
+          try {
+            task = await getTask(taskId, signal);
+            firstPoll = false;
+            break;
+          } catch (retryErr) {
+            if (!isManusNotFoundError(retryErr)) throw retryErr;
+            // else keep retrying with longer delay
+            task = undefined as unknown as ManusGetResponse;
+          }
+        }
+        if (!task!) throw err;
+      } else {
+        throw err;
+      }
+    }
+    firstPoll = false;
     if (
-      task.status === "completed" ||
-      task.status === "failed" ||
-      task.status === "cancelled"
+      task!.status === "completed" ||
+      task!.status === "failed" ||
+      task!.status === "cancelled"
     ) {
-      return task;
+      return task!;
     }
     if (Date.now() > deadline) {
       throw new Error(
-        `Manus task timed out after ${POLL_MAX_MS / 60_000} minutes. Task: ${task.metadata?.task_url ?? taskId}`,
+        `Manus task timed out after ${POLL_MAX_MS / 60_000} minutes. Task: ${task!.metadata?.task_url ?? taskId}`,
       );
     }
     await sleep(POLL_INTERVAL_MS, signal);
   }
+}
+
+function isManusNotFoundError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  const m = err.message.toLowerCase();
+  return m.includes("task not found") || m.includes("[http_5]");
 }
 
 /**

@@ -121,22 +121,22 @@ export const MODEL_OPTIONS: ModelOption[] = [
     korean: 3,
   },
   {
-    id: "groq/meta-llama/llama-4-maverick-17b-128e-instruct",
-    displayName: "Llama 4 Maverick",
+    id: "groq/meta-llama/llama-4-scout-17b-16e-instruct",
+    displayName: "Llama 4 Scout",
     family: "groq",
     tier: "premium",
     description:
-      "FREE — Meta's Llama 4 Maverick (128-expert MoE) via Groq. Strong general reasoning, supports strict json_schema. No per-query cost.",
+      "FREE — Meta's Llama 4 Scout (17B-active, 16-expert MoE) via Groq. Strong general reasoning, supports strict json_schema. No per-query cost.",
     korean: 3,
   },
   {
-    id: "groq/moonshotai/kimi-k2-instruct",
-    displayName: "Kimi K2",
+    id: "groq/openai/gpt-oss-20b",
+    displayName: "GPT-OSS 20B",
     family: "groq",
-    tier: "premium",
+    tier: "balanced",
     description:
-      "FREE — Moonshot's Kimi K2 via Groq. 1M context, strong Korean / Chinese / Japanese (CJK was a key training focus). Best free pick for Korean legal nuance. No per-query cost.",
-    korean: 4,
+      "FREE — Smaller OpenAI open-weight (20B params) via Groq. Faster than GPT-OSS 120B, same family. Reliable JSON. No per-query cost.",
+    korean: 3,
   },
 ];
 
@@ -181,13 +181,15 @@ const LEGACY_ID_ALIASES: Record<string, string> = {
   "google/gemini-3.1-flash-lite": "google/gemini-3.1-pro-preview",
   // Mixture-of-Agents was removed entirely — fall back to Claude Sonnet
   "auto/mixture-of-agents": "anthropic/claude-sonnet-4.6",
-  // Groq legacy aliases — gpt-oss-120b / llama-4-maverick / kimi-k2 are
-  // back in the registry as free options, the others migrate to them.
-  "groq/openai/gpt-oss-20b": "groq/openai/gpt-oss-120b",
-  "groq/meta-llama/llama-4-scout-17b-16e-instruct": "groq/meta-llama/llama-4-maverick-17b-128e-instruct",
-  "groq/llama-3.3-70b-versatile": "groq/meta-llama/llama-4-maverick-17b-128e-instruct",
-  "groq/llama-3.1-8b-instant": "groq/meta-llama/llama-4-maverick-17b-128e-instruct",
-  "groq/qwen/qwen3-32b": "groq/moonshotai/kimi-k2-instruct",
+  // Groq legacy aliases — current free roster is gpt-oss-120b / llama-4-scout /
+  // gpt-oss-20b (all verified available on the production Groq account).
+  // Models that aren't on this account (maverick, kimi-k2) migrate to the
+  // nearest available equivalent.
+  "groq/meta-llama/llama-4-maverick-17b-128e-instruct": "groq/meta-llama/llama-4-scout-17b-16e-instruct",
+  "groq/moonshotai/kimi-k2-instruct": "groq/openai/gpt-oss-20b",
+  "groq/llama-3.3-70b-versatile": "groq/meta-llama/llama-4-scout-17b-16e-instruct",
+  "groq/llama-3.1-8b-instant": "groq/openai/gpt-oss-20b",
+  "groq/qwen/qwen3-32b": "groq/openai/gpt-oss-20b",
   "xai/grok-4": "anthropic/claude-sonnet-4.6",
   "xai/grok-4-heavy": "anthropic/claude-sonnet-4.6",
   "xai/grok-4.3": "anthropic/claude-sonnet-4.6",
