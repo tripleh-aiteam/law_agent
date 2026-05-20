@@ -20,13 +20,16 @@ import {
 /* Family glyph                                                                */
 /* -------------------------------------------------------------------------- */
 
+// Brand-aligned single-character glyphs. Letters match the displayed brand
+// name (Claude → C, ChatGPT → G as in GPT, Gemini → ♊ zodiac sign to avoid
+// collision with ChatGPT's G).
 const FAMILY_GLYPH: Record<
   ModelFamily,
   { letter: string; classes: string }
 > = {
-  anthropic: { letter: "A", classes: "bg-orange-100 text-orange-700" },
-  openai: { letter: "O", classes: "bg-emerald-100 text-emerald-700" },
-  google: { letter: "G", classes: "bg-blue-100 text-blue-700" },
+  anthropic: { letter: "C", classes: "bg-orange-100 text-orange-700" },
+  openai: { letter: "G", classes: "bg-emerald-100 text-emerald-700" },
+  google: { letter: "♊", classes: "bg-blue-100 text-blue-700" },
 };
 
 function FamilyGlyph({ family }: { family: ModelFamily }) {

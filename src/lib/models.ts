@@ -43,11 +43,11 @@ export const MODEL_OPTIONS: ModelOption[] = [
   },
   {
     id: "anthropic/claude-sonnet-4.6",
-    displayName: "Claude Sonnet 4.6",
+    displayName: "Claude Sonnet 4.6 (Manus)",
     family: "anthropic",
     tier: "balanced",
     description:
-      "~90% of Opus quality at 1/5 the cost. Excellent Korean legal handling. Best value model. ~$0.05/query.",
+      "The same model Manus AI uses under the hood. ~90% of Opus quality at 1/5 the cost. Excellent Korean legal handling. Best value model. ~$0.05/query.",
     korean: 5,
   },
 
@@ -197,11 +197,16 @@ export function safeModelIds(input: readonly string[] | null | undefined): strin
   return result.length > 0 ? result : [...DEFAULT_SELECTED_MODEL_IDS];
 }
 
-/** Family display order + labels for the selector UI. */
+/**
+ * Family display order + labels for the selector UI.
+ * Labels are intentionally consumer-friendly: drop the parent-company
+ * prefix ("Anthropic", "Google") and use the user-recognizable brand
+ * name only ("Claude", "ChatGPT", "Gemini").
+ */
 export const FAMILY_LABELS: Record<ModelFamily, { ko: string; en: string }> = {
-  anthropic: { ko: "Anthropic Claude", en: "Anthropic Claude" },
-  openai: { ko: "OpenAI", en: "OpenAI" },
-  google: { ko: "Google Gemini", en: "Google Gemini" },
+  anthropic: { ko: "Claude", en: "Claude" },
+  openai: { ko: "ChatGPT", en: "ChatGPT" },
+  google: { ko: "Gemini", en: "Gemini" },
 };
 
 export const TIER_LABELS: Record<ModelTier, { ko: string; en: string }> = {
