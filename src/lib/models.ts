@@ -29,9 +29,27 @@ export interface ModelOption {
   experimental?: boolean;
 }
 
-/** The 7 strongest models. Order = display order in the selector. */
+/** The 8 strongest models. Order = display order in the selector.
+ *  Manus first (premium autonomous agent), then Claude, ChatGPT, Gemini. */
 export const MODEL_OPTIONS: ModelOption[] = [
-  // ─── Anthropic Claude (best Korean legal nuance) ─────────────────────
+  // ─── Manus (autonomous agent — pinned to top per user preference) ────
+  // Not just an LLM: Manus is a full autonomous agent that browses the web,
+  // executes code, and produces multi-step research reports. It runs ASYNC
+  // (5–30 min per task) and costs much more than a plain LLM call
+  // (~$0.50–$5 per task vs. ~$0.05 for Claude). Use it when you want
+  // research that goes beyond what's in our local 판례 corpus.
+  {
+    id: "manus/agent",
+    displayName: "Manus (autonomous agent)",
+    family: "manus",
+    tier: "premium",
+    description:
+      "Full autonomous agent — browses the web, drafts reports, runs multi-step research. SLOW (5–30 min per task) and EXPENSIVE (~$0.50–$5/query). Use for hard cases that need live court-case research, not for routine queries. Needs MANUS_API_KEY on Vercel.",
+    korean: 4,
+    experimental: true,
+  },
+
+  // ─── Claude (best Korean legal nuance) ──────────────────────────────
   {
     id: "anthropic/claude-opus-4.7",
     displayName: "Claude Opus 4.7",
@@ -51,7 +69,7 @@ export const MODEL_OPTIONS: ModelOption[] = [
     korean: 5,
   },
 
-  // ─── OpenAI (strongest reasoning + most reliable structured output) ──
+  // ─── ChatGPT (strongest reasoning + most reliable structured output) ──
   {
     id: "openai/gpt-5.5",
     displayName: "GPT-5.5",
@@ -89,7 +107,7 @@ export const MODEL_OPTIONS: ModelOption[] = [
     korean: 5,
   },
 
-  // ─── Google Gemini (cross-vendor viewpoint) ──────────────────────────
+  // ─── Gemini (cross-vendor viewpoint) ────────────────────────────────
   {
     id: "google/gemini-3.1-pro-preview",
     displayName: "Gemini 3.1 Pro Preview",
@@ -97,23 +115,6 @@ export const MODEL_OPTIONS: ModelOption[] = [
     tier: "premium",
     description:
       "Google's flagship preview. Different vendor than Anthropic/OpenAI — cross-checks the dominant axis. Needs GOOGLE_GENERATIVE_AI_API_KEY on Vercel. ~$0.04/query.",
-    korean: 4,
-    experimental: true,
-  },
-
-  // ─── Manus (autonomous agent — different beast entirely) ─────────────
-  // Not just an LLM: Manus is a full autonomous agent that browses the web,
-  // executes code, and produces multi-step research reports. It runs ASYNC
-  // (5–30 min per task) and costs much more than a plain LLM call
-  // (~$0.50–$5 per task vs. ~$0.05 for Claude). Use it when you want
-  // research that goes beyond what's in our local 판례 corpus.
-  {
-    id: "manus/agent",
-    displayName: "Manus (autonomous agent)",
-    family: "manus",
-    tier: "premium",
-    description:
-      "Full autonomous agent — browses the web, drafts reports, runs multi-step research. SLOW (5–30 min per task) and EXPENSIVE (~$0.50–$5/query). Use for hard cases that need live court-case research, not for routine queries. Needs MANUS_API_KEY on Vercel.",
     korean: 4,
     experimental: true,
   },
