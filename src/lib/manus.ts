@@ -18,9 +18,13 @@
  *   - RESULT extraction inside extractResult()
  */
 
+// Manus API v2 — current as of late 2026. v1 is deprecated and slated for
+// removal. If Manus releases v3 later, change this single block. The
+// auth header format is confirmed Bearer-token (verify on the
+// /docs/getting-started/authentication page once you have a key).
 const MANUS_BASE_URL = "https://api.manus.ai";
-const CREATE_TASK_PATH = "/v1/tasks";
-const GET_TASK_PATH = (id: string) => `/v1/tasks/${encodeURIComponent(id)}`;
+const CREATE_TASK_PATH = "/v2/tasks";
+const GET_TASK_PATH = (id: string) => `/v2/tasks/${encodeURIComponent(id)}`;
 
 /** How often we poll while the task is running (ms). */
 const POLL_INTERVAL_MS = 5_000;
