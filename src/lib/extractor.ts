@@ -54,13 +54,28 @@ LANGUAGE RULES (critical):
 - Statute citations should follow Korean conventions (e.g. "민법 제750조", "상법 제382조의3", "근로기준법 제23조").
 - clarifyingQuestions.question and clarifyingQuestions.why MUST be written in the user's locale (provided in the user prompt). Everything else stays Korean.
 
-EXTRACTION RULES:
+EXTRACTION RULES (FOR FACT-PATTERN INPUTS):
 - Be concrete. Avoid generic placeholders like "분쟁" or "당사자 간 문제".
 - 쟁점 (coreIssue) is the controlling legal question, not a fact summary. Phrase it as a question the court would answer.
 - keyFacts: only load-bearing facts that move the legal analysis. Strip narrative color.
 - missingInfo: facts that would CHANGE the analysis if known — not nice-to-haves.
 - applicableStatutes: include specific articles when the narrative supports it; if only the statute is clear, list the statute alone.
 - caseNature: pick the single best match from the enum.
+
+EXTRACTION RULES (FOR NON-CASE INPUTS — CRITICAL):
+- The input might NOT be a fact pattern — it could be a 판결문 (court judgment), an academic analysis, a doctrinal note, a draft brief, or a legal essay. NEVER refuse. NEVER return prose explaining you can't extract a case. ALWAYS return the JSON schema with EVERY field present.
+- For fields that don't apply, use SAFE DEFAULTS rather than refusing:
+  • parties.plaintiff / parties.defendant: if no actual parties, use a brief descriptor of the analyzed subject (e.g. "분석 대상 — 임대주택용지 공급사업" / "Subject of analysis — rental housing land supply"). NEVER leave as empty string.
+  • claimCause: if no claim, summarize the main legal proposition the document advances (e.g. "공공지원민간임대주택 공급방식에 관한 해석론").
+  • legalRelationship: name the underlying legal relationship the document discusses (e.g. "공공주택사업자와 토지공급주체 간 법률관계").
+  • partyStatus: best-effort role descriptor (e.g. "사업시행자 / 분양 대상자"). Don't refuse.
+  • coreIssue: phrase the central legal question the document is examining.
+  • damageType: if no damage discussed, use "해당 없음 (분석 자료)" or analogous.
+  • applicableStatutes: list every statute the document references.
+  • keyFacts: extract the document's main analytical findings as facts.
+  • missingInfo: things the document doesn't resolve / open questions it raises.
+  • caseNature: pick "unknown" if you genuinely can't classify, otherwise the closest match.
+- The goal: every JSON field gets a meaningful Korean value. The downstream system can handle "analysis documents" as long as the schema is filled in.
 
 CLARIFYING QUESTIONS RULES:
 - Produce 0 questions if the narrative already covers party type, written agreement existence, jurisdiction/venue, timeline, and prior litigation.

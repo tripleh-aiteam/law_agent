@@ -129,15 +129,6 @@ export const MODEL_OPTIONS: ModelOption[] = [
       "FREE — Meta's Llama 4 Scout (17B-active, 16-expert MoE) via Groq. Strong general reasoning, supports strict json_schema. No per-query cost.",
     korean: 3,
   },
-  {
-    id: "groq/openai/gpt-oss-20b",
-    displayName: "GPT-OSS 20B",
-    family: "groq",
-    tier: "balanced",
-    description:
-      "FREE — Smaller OpenAI open-weight (20B params) via Groq. Faster than GPT-OSS 120B, same family. Reliable JSON. No per-query cost.",
-    korean: 3,
-  },
 ];
 
 /** Default model when none selected — best price/quality. */
@@ -181,15 +172,15 @@ const LEGACY_ID_ALIASES: Record<string, string> = {
   "google/gemini-3.1-flash-lite": "google/gemini-3.1-pro-preview",
   // Mixture-of-Agents was removed entirely — fall back to Claude Sonnet
   "auto/mixture-of-agents": "anthropic/claude-sonnet-4.6",
-  // Groq legacy aliases — current free roster is gpt-oss-120b / llama-4-scout /
-  // gpt-oss-20b (all verified available on the production Groq account).
-  // Models that aren't on this account (maverick, kimi-k2) migrate to the
-  // nearest available equivalent.
+  // Groq legacy aliases — current free roster is gpt-oss-120b + llama-4-scout.
+  // Anything older or not in the user's account migrates to gpt-oss-120b
+  // (the most powerful free option).
+  "groq/openai/gpt-oss-20b": "groq/openai/gpt-oss-120b",
   "groq/meta-llama/llama-4-maverick-17b-128e-instruct": "groq/meta-llama/llama-4-scout-17b-16e-instruct",
-  "groq/moonshotai/kimi-k2-instruct": "groq/openai/gpt-oss-20b",
+  "groq/moonshotai/kimi-k2-instruct": "groq/openai/gpt-oss-120b",
   "groq/llama-3.3-70b-versatile": "groq/meta-llama/llama-4-scout-17b-16e-instruct",
-  "groq/llama-3.1-8b-instant": "groq/openai/gpt-oss-20b",
-  "groq/qwen/qwen3-32b": "groq/openai/gpt-oss-20b",
+  "groq/llama-3.1-8b-instant": "groq/openai/gpt-oss-120b",
+  "groq/qwen/qwen3-32b": "groq/openai/gpt-oss-120b",
   "xai/grok-4": "anthropic/claude-sonnet-4.6",
   "xai/grok-4-heavy": "anthropic/claude-sonnet-4.6",
   "xai/grok-4.3": "anthropic/claude-sonnet-4.6",
