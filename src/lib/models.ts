@@ -64,19 +64,11 @@ export const MODEL_OPTIONS: ModelOption[] = [
       "Cheap, fast OpenAI model. Lower legal nuance than full GPT-4o but ~15× cheaper.",
     korean: 4,
   },
-  // ─── Google Gemini ─────────────────────────────────────────────────
-  // Note: gemini-2.5-pro is currently removed from the selector — its
-  // structured-output (JSON schema) mode is unreliable with AI SDK v6,
-  // returning "could not parse" errors. Use Flash for Gemini calls.
-  {
-    id: "google/gemini-2.5-flash",
-    displayName: "Gemini 2.5 Flash",
-    family: "google",
-    tier: "fast",
-    description:
-      "Fast Google model. Solid Korean handling at very low cost.",
-    korean: 4,
-  },
+  // ─── Google Gemini (currently disabled) ────────────────────────────
+  // Both gemini-2.5-pro and gemini-2.5-flash fail too often on our
+  // complex structured-output schema (returning markdown-wrapped or
+  // malformed JSON ~2 out of 3 calls). Removed from the selector until
+  // Google's JSON mode behaves consistently.
 ];
 
 /** Default model — used when the user hasn't selected one yet. */
