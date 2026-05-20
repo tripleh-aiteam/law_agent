@@ -22,10 +22,21 @@ import type {
 
 type Phase = "idle" | "extracting" | "searching";
 
-type UploadState = {
+/** A file the user attached as context. Stays visible as a chip above the
+ *  textarea until the user removes it OR sends the message. */
+type Attachment = {
   id: string;
-  name: string;
-  status: "uploading" | "done" | "error";
+  filename: string;
+  byteSize: number;
+  status: "loading" | "ready" | "error";
+  /** Extracted text (only populated when status === "ready"). */
+  text: string;
+  /** Character count, for the chip's "...chars extracted" hint. */
+  chars: number;
+  /** Inline warnings from the extractor (e.g. HWP unsupported, scanned PDF). */
+  warnings: string[];
+  /** Error message when status === "error". */
+  errorMessage?: string;
 };
 
 interface ExtractResponse {
@@ -88,7 +99,7 @@ export function ChatInput() {
   const [value, setValue] = React.useState("");
   const [phase, setPhase] = React.useState<Phase>("idle");
   const [error, setError] = React.useState<string | null>(null);
-  const [uploads, setUploads] = React.useState<UploadState[]>([]);
+  const [attachments, setAttachments] = React.useState<Attachment[]>([]);
   const [isDragOver, setIsDragOver] = React.useState(false);
   const [isRecording, setIsRecording] = React.useState(false);
 
@@ -151,13 +162,23 @@ export function ChatInput() {
       if (list.length === 0) return;
       for (const file of list) {
         const id = uid();
-        setUploads((u) => [
-          ...u,
-          { id, name: file.name, status: "uploading" },
+        // Optimistically push a "loading" attachment chip — never inject
+        // the extracted text into the textarea (that's Manus-style:
+        // the file is CONTEXT, the textarea is the QUESTION).
+        setAttachments((prev) => [
+          ...prev,
+          {
+            id,
+            filename: file.name,
+            byteSize: file.size,
+            status: "loading",
+            text: "",
+            chars: 0,
+            warnings: [],
+          },
         ]);
         try {
           const formData = new FormData();
-          // Backend (/api/upload) reads from formData.getAll("files") — must be plural.
           formData.append("files", file);
           const res = await fetch("/api/upload", {
             method: "POST",
@@ -180,39 +201,60 @@ export function ChatInput() {
           };
           const extractedFile = data.files?.[0];
           const extracted = (extractedFile?.text ?? "").trim();
-          if (extracted) {
-            setValue((prev) => {
-              const sep =
-                prev.length > 0 && !prev.endsWith("\n") ? "\n\n" : "";
-              return `${prev}${sep}---\n[FROM FILE: ${file.name}]\n${extracted}`;
-            });
-          } else if (extractedFile?.warnings?.length) {
-            // No extracted text (e.g. HWP, scanned PDF) — surface the warning
-            // inline instead of silently dropping the upload.
-            console.warn(
-              `[upload] ${file.name}: ${extractedFile.warnings.join("; ")}`,
-            );
-          }
-          setUploads((u) =>
-            u.map((it) =>
-              it.id === id ? { ...it, status: "done" as const } : it,
+          const warnings = extractedFile?.warnings ?? [];
+          setAttachments((prev) =>
+            prev.map((a) =>
+              a.id === id
+                ? {
+                    ...a,
+                    status: extracted ? "ready" : "error",
+                    text: extracted,
+                    chars: extracted.length,
+                    warnings,
+                    errorMessage: extracted
+                      ? undefined
+                      : warnings[0] ?? "No text extracted from file.",
+                  }
+                : a,
             ),
           );
-          // Remove the chip after a short delay.
-          setTimeout(() => {
-            setUploads((u) => u.filter((it) => it.id !== id));
-          }, 1500);
         } catch (err) {
-          console.error(err);
-          setUploads((u) =>
-            u.map((it) =>
-              it.id === id ? { ...it, status: "error" as const } : it,
+          const message = err instanceof Error ? err.message : String(err);
+          setAttachments((prev) =>
+            prev.map((a) =>
+              a.id === id
+                ? { ...a, status: "error", errorMessage: message }
+                : a,
             ),
           );
         }
       }
     },
     [],
+  );
+
+  const removeAttachment = React.useCallback((id: string) => {
+    setAttachments((prev) => prev.filter((a) => a.id !== id));
+  }, []);
+
+  /** Build the narrative sent to /api/extract by combining the user's
+   *  question (the textarea text) with the attached files. The user's
+   *  question is placed FIRST and clearly labeled so the LLM treats it
+   *  as the primary signal, with files as supplementary context. */
+  const buildNarrative = React.useCallback(
+    (question: string): string => {
+      const q = question.trim();
+      const ready = attachments.filter(
+        (a) => a.status === "ready" && a.text.length > 0,
+      );
+      if (ready.length === 0) return q;
+      const fileBlocks = ready
+        .map((a) => `[첨부파일 / Attached file: ${a.filename}]\n${a.text}`)
+        .join("\n\n---\n\n");
+      if (!q) return fileBlocks;
+      return `[사용자 질의 / User question]\n${q}\n\n---\n\n${fileBlocks}`;
+    },
+    [attachments],
   );
 
   const onPickFiles = () => {
@@ -308,11 +350,14 @@ export function ChatInput() {
   }, []);
 
   // ---------- Send pipeline ----------
+  const hasReadyAttachments = attachments.some((a) => a.status === "ready");
+  // Allow sending if the user typed >= 10 chars OR has at least one ready file.
   const canSend =
-    phase === "idle" && value.trim().length >= 20;
+    phase === "idle" &&
+    (value.trim().length >= 10 || hasReadyAttachments);
 
   const onSend = async () => {
-    const narrative = value.trim();
+    const narrative = buildNarrative(value);
     if (!narrative) return;
 
     // Make sure we have an active case to write into.
@@ -352,6 +397,9 @@ export function ChatInput() {
       if (!srRes.ok) throw new Error(`Search failed: ${srRes.status}`);
       const srData = (await srRes.json()) as SearchResponse;
       updateCase(targetId, { matches: srData.matches ?? [] });
+      // Clear attachments after successful send — they've been baked into
+      // the case's narrative. The user can attach fresh files for a follow-up.
+      setAttachments([]);
       setPhase("idle");
     } catch (err) {
       console.error(err);
@@ -391,50 +439,80 @@ export function ChatInput() {
           </div>
         )}
 
+        {/* Attachment chip area — shows above the textarea so users see
+            their files as CONTEXT, separate from their question. Each chip
+            includes filename, size, status, and a remove button.            */}
+        {attachments.length > 0 && (
+          <div className="flex flex-wrap gap-2 border-b border-slate-100 px-4 pt-3 pb-3">
+            {attachments.map((a) => (
+              <div
+                key={a.id}
+                className={cn(
+                  "group flex items-center gap-2.5 rounded-lg border px-3 py-2 text-sm transition-colors",
+                  a.status === "loading" &&
+                    "border-slate-200 bg-slate-50",
+                  a.status === "ready" &&
+                    "border-emerald-200 bg-emerald-50",
+                  a.status === "error" &&
+                    "border-rose-200 bg-rose-50",
+                )}
+                title={a.errorMessage ?? a.warnings.join("\n") ?? a.filename}
+              >
+                {a.status === "loading" ? (
+                  <Loader2
+                    className="h-4 w-4 shrink-0 animate-spin text-slate-500"
+                    aria-hidden
+                  />
+                ) : a.status === "error" ? (
+                  <X className="h-4 w-4 shrink-0 text-rose-600" aria-hidden />
+                ) : (
+                  <Paperclip
+                    className="h-4 w-4 shrink-0 text-emerald-600"
+                    aria-hidden
+                  />
+                )}
+                <div className="min-w-0 max-w-[220px]">
+                  <div className="truncate text-xs font-medium text-slate-900">
+                    {a.filename}
+                  </div>
+                  <div className="truncate text-[10px] text-slate-500">
+                    {a.status === "loading"
+                      ? "추출 중..."
+                      : a.status === "error"
+                        ? a.errorMessage ?? "Failed"
+                        : `${(a.byteSize / 1024).toFixed(0)} KB · ${a.chars.toLocaleString()} chars`}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => removeAttachment(a.id)}
+                  className="ml-1 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-slate-400 transition-colors hover:bg-slate-200 hover:text-slate-700"
+                  aria-label="Remove attachment"
+                  title="Remove"
+                >
+                  <X className="h-3 w-3" aria-hidden />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
         <textarea
           ref={textareaRef}
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={onKeyDown}
           onPaste={onPaste}
-          placeholder={tChat("placeholder")}
+          placeholder={
+            attachments.length > 0
+              ? tChat("placeholderWithFiles")
+              : tChat("placeholder")
+          }
           disabled={isBusy}
           rows={4}
-          className="block w-full resize-none rounded-2xl bg-transparent px-5 pt-5 pb-2 text-[15px] leading-relaxed text-slate-900 outline-none placeholder:text-slate-400 disabled:opacity-60"
+          className="block w-full resize-none rounded-2xl bg-transparent px-5 pt-5 pb-2 text-[16px] font-medium leading-relaxed text-slate-900 outline-none placeholder:font-normal placeholder:text-slate-400 disabled:opacity-60"
           style={{ minHeight: 120 }}
         />
-
-        {uploads.length > 0 && (
-          <div className="flex flex-wrap gap-1.5 px-4 pb-2">
-            {uploads.map((u) => (
-              <span
-                key={u.id}
-                className={cn(
-                  "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px]",
-                  u.status === "uploading" &&
-                    "bg-slate-100 text-slate-600",
-                  u.status === "done" &&
-                    "bg-emerald-100 text-emerald-700",
-                  u.status === "error" && "bg-rose-100 text-rose-700",
-                )}
-              >
-                {u.status === "uploading" && (
-                  <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
-                )}
-                <span className="max-w-[180px] truncate">{u.name}</span>
-                {u.status === "error" && (
-                  <X
-                    className="h-3 w-3 cursor-pointer"
-                    onClick={() =>
-                      setUploads((us) => us.filter((it) => it.id !== u.id))
-                    }
-                    aria-hidden
-                  />
-                )}
-              </span>
-            ))}
-          </div>
-        )}
 
         <div className="flex items-center justify-between gap-2 border-t border-slate-100 px-3 py-2">
           <div className="flex items-center gap-1">

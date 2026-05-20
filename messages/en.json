@@ -135,6 +135,7 @@
   },
   "chat": {
     "placeholder": "Describe the case facts in detail. Include parties, sequence of events, cause of claim, damages, and dates.",
+    "placeholderWithFiles": "Ask a question about your attached file(s) or add more facts.",
     "send": "Send",
     "attachFile": "Attach file",
     "startRecording": "Start voice input",

@@ -133,7 +133,7 @@ export function ModelSelector(): React.ReactElement {
           ref={menuRef}
           role="listbox"
           aria-label={tHeader("modelSelector")}
-          className="absolute right-0 z-50 mt-1.5 w-[340px] overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg"
+          className="absolute right-0 z-50 mt-1.5 w-[280px] overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg"
         >
           <div className="border-b border-slate-100 px-3 py-2">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
@@ -165,30 +165,24 @@ export function ModelSelector(): React.ReactElement {
                         setOpen(false);
                       }}
                       className={cn(
-                        "flex w-full items-start gap-2 px-3 py-2 text-left transition-colors hover:bg-slate-50",
+                        "flex w-full items-center gap-2 px-3 py-1.5 text-left transition-colors hover:bg-slate-50",
                         selected && "bg-slate-100/80",
                       )}
+                      title={opt.description}
                     >
-                      <span className="mt-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center">
+                      <span className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center">
                         {selected ? (
                           <Check className="h-3.5 w-3.5 text-slate-900" aria-hidden />
                         ) : opt.tier === "premium" ? (
-                          <Brain className="h-3.5 w-3.5 text-violet-500" aria-hidden />
+                          <Brain className="h-3 w-3 text-violet-400" aria-hidden />
                         ) : (
-                          <Zap className="h-3.5 w-3.5 text-slate-400" aria-hidden />
+                          <Zap className="h-3 w-3 text-slate-400" aria-hidden />
                         )}
                       </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="flex items-center gap-1.5">
-                          <span className="text-sm font-medium text-slate-900">
-                            {opt.displayName}
-                          </span>
-                          <TierBadge tier={opt.tier} locale={locale} />
-                        </span>
-                        <span className="mt-0.5 block text-[11px] leading-snug text-slate-500">
-                          {opt.description}
-                        </span>
+                      <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-900">
+                        {opt.displayName}
                       </span>
+                      <TierBadge tier={opt.tier} locale={locale} />
                     </button>
                   );
                 })}
