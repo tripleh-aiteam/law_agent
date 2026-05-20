@@ -4,6 +4,7 @@ import { z } from "zod";
 import { LegalElementsSchema } from "@/lib/types";
 import { EXTRACTION_MODEL } from "@/lib/ai";
 import { safeModelId } from "@/lib/models";
+import { resolveModelForUse } from "@/lib/resolve-model";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -93,7 +94,9 @@ export async function POST(req: Request): Promise<Response> {
   ].join("\n");
 
   try {
-    const model = parsed.data.model ? safeModelId(parsed.data.model) : EXTRACTION_MODEL;
+    const model = parsed.data.model
+      ? (resolveModelForUse(parsed.data.model) ?? safeModelId(parsed.data.model))
+      : EXTRACTION_MODEL;
     const result = await generateObject({
       model,
       schema: SummarySchema,

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { LegalElementsSchema, type LegalElements, type ClarifyingQuestion } from "./types";
 import { EXTRACTION_MODEL } from "./ai";
 import { safeModelId } from "./models";
+import { resolveModelForUse } from "./resolve-model";
 
 /**
  * Schema used for the extraction call. We extend LegalElementsSchema with a
@@ -55,7 +56,30 @@ CLARIFYING QUESTIONS RULES:
 - "why" explains in 1 sentence how the answer would change which 판례 are citable.
 - IDs are stable snake_case identifiers (e.g. q_party_type, q_written_agreement, q_jurisdiction, q_timeline_gap, q_prior_litigation).`;
 
-const TIMEOUT_MS = 45_000;
+const TIMEOUT_MS = 90_000;
+
+/**
+ * Cap the narrative sent to the LLM. Large PDFs combined with the question
+ * and the system prompt can otherwise blow past slow models' practical
+ * timeouts (e.g. Claude Opus on a 25k-char attachment).
+ *
+ * We trim the MIDDLE of overly-long narratives, keeping both the start
+ * (often the user's question + recent facts) and the end (often citations
+ * or judgment text from attached files). Result: representative slice
+ * that fits within most premium models' tactical budget.
+ */
+const MAX_NARRATIVE_CHARS = 18_000;
+
+function trimMiddle(narrative: string): string {
+  if (narrative.length <= MAX_NARRATIVE_CHARS) return narrative;
+  const head = Math.floor(MAX_NARRATIVE_CHARS * 0.6);
+  const tail = Math.floor(MAX_NARRATIVE_CHARS * 0.35);
+  return (
+    narrative.slice(0, head) +
+    `\n\n…[중간 생략 / middle truncated — ${narrative.length - head - tail} chars]…\n\n` +
+    narrative.slice(narrative.length - tail)
+  );
+}
 
 /**
  * Extracts structured Korean legal elements and clarifying questions from a
@@ -67,20 +91,24 @@ export async function extractLegalElements(
   locale: "ko" | "en",
   modelId?: string,
 ): Promise<{ elements: LegalElements; clarifyingQuestions: ClarifyingQuestion[] }> {
+  const trimmedNarrative = trimMiddle(narrative.trim());
   const userPrompt = [
     `User locale (for clarifyingQuestions only): ${locale === "ko" ? "Korean (한국어)" : "English"}`,
     "",
     "Narrative:",
     "---",
-    narrative.trim(),
+    trimmedNarrative,
     "---",
     "",
     "Extract the legal elements in Korean. Write clarifyingQuestions in the user locale above.",
   ].join("\n");
 
-  // If the caller passes a model ID, route via AI Gateway (string form).
-  // Otherwise fall back to the default direct-Groq EXTRACTION_MODEL.
-  const model = modelId ? safeModelId(modelId) : EXTRACTION_MODEL;
+  // Resolve the caller's selected model: prefer a direct provider when its
+  // API key is set (more predictable rate limits, fewer hops), fall back
+  // to the AI Gateway string form, else the module's default EXTRACTION_MODEL.
+  const model = modelId
+    ? (resolveModelForUse(modelId) ?? safeModelId(modelId))
+    : EXTRACTION_MODEL;
 
   const result = await generateObject({
     model,
