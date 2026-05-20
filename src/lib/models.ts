@@ -55,22 +55,17 @@ export const MODEL_OPTIONS: ModelOption[] = [
   },
 
   // ─── Claude (best Korean legal nuance) ──────────────────────────────
-  {
-    id: "anthropic/claude-opus-4.7",
-    displayName: "Claude Opus 4.7",
-    family: "anthropic",
-    tier: "premium",
-    description:
-      "Anthropic's flagship. Gold standard for Korean legal reasoning — deepest nuance, most careful citability judgments. ~$0.25/query.",
-    korean: 5,
-  },
+  // Opus 4.7 removed per user request — it was strict about non-case
+  // input documents and burned credit on long contexts. Sonnet 4.6 is
+  // the daily driver: nearly Opus-quality at 1/5 cost, and it's the
+  // same model Manus uses under the hood. Re-add Opus later if needed.
   {
     id: "anthropic/claude-sonnet-4.6",
     displayName: "Claude Sonnet 4.6 (Manus)",
     family: "anthropic",
-    tier: "balanced",
+    tier: "premium",
     description:
-      "The same model Manus AI uses under the hood. ~90% of Opus quality at 1/5 the cost. Excellent Korean legal handling. Best value model. ~$0.05/query.",
+      "The same model Manus AI uses under the hood. Excellent Korean legal handling. Now the default Claude model. ~$0.05/query.",
     korean: 5,
   },
 
@@ -145,14 +140,15 @@ const MODEL_BY_ID = new Map(MODEL_OPTIONS.map((m) => [m.id, m]));
  * the migration.
  */
 const LEGACY_ID_ALIASES: Record<string, string> = {
-  // Dash-form Anthropic IDs (gateway used to accept these)
-  "anthropic/claude-opus-4-7": "anthropic/claude-opus-4.7",
+  // Anthropic — only Sonnet 4.6 remains in the registry. Every other
+  // Claude id (dashed, dotted, older gens, Opus, Haiku) migrates to it.
+  "anthropic/claude-opus-4.7": "anthropic/claude-sonnet-4.6",
+  "anthropic/claude-opus-4-7": "anthropic/claude-sonnet-4.6",
   "anthropic/claude-sonnet-4-6": "anthropic/claude-sonnet-4.6",
-  // Models removed from the 7-LLM roster — map to nearest equivalent
   "anthropic/claude-haiku-4-5": "anthropic/claude-sonnet-4.6",
   "anthropic/claude-haiku-4.5": "anthropic/claude-sonnet-4.6",
-  "anthropic/claude-opus-4-6": "anthropic/claude-opus-4.7",
-  "anthropic/claude-opus-4.6": "anthropic/claude-opus-4.7",
+  "anthropic/claude-opus-4-6": "anthropic/claude-sonnet-4.6",
+  "anthropic/claude-opus-4.6": "anthropic/claude-sonnet-4.6",
   "anthropic/claude-sonnet-4-5": "anthropic/claude-sonnet-4.6",
   "anthropic/claude-sonnet-4.5": "anthropic/claude-sonnet-4.6",
   "openai/gpt-4o-mini": "openai/gpt-5.5",
