@@ -2,11 +2,13 @@
 
 import * as React from "react";
 
+import { safeModelIds, DEFAULT_SELECTED_MODEL_IDS } from "@/lib/models";
 import type {
   CaseQuestion,
   CaseTurn,
   LegalElements,
   PrecedentMatch,
+  TurnBranch,
 } from "@/lib/types";
 
 export type CaseFile = {
@@ -47,8 +49,13 @@ const STORAGE_KEY = "law-agent:cases";
 type StoredState = {
   folders: Folder[];
   currentCaseId: string | null;
-  /** AI model selected for LLM tasks (extract / search rerank / dashboard). */
-  selectedModelId: string | null;
+  /**
+   * AI models selected for the next query. When this list has one entry,
+   * the app behaves as a single-model chatbot. When it has 2+, the send
+   * pipeline fans out in parallel and the UI renders results as tabs so
+   * the user can compare and pick the best answer themselves.
+   */
+  selectedModelIds: string[];
 };
 
 type CasesContextValue = {
@@ -57,10 +64,12 @@ type CasesContextValue = {
   currentCase: CaseFile | null;
   /** Folder ID of the parent folder of the currently-selected case (null if none). */
   currentFolderId: string | null;
-  /** Currently-selected LLM model ID (e.g. "anthropic/claude-opus-4-7"). */
-  selectedModelId: string | null;
-  /** Setter for the selected model — persists to localStorage. */
-  setSelectedModelId: (modelId: string) => void;
+  /** Currently-selected LLM models. Always at least 1 entry. */
+  selectedModelIds: string[];
+  /** Replace the entire selection (use for "Apply" in multi-select panel). */
+  setSelectedModelIds: (modelIds: string[]) => void;
+  /** Toggle a single model in/out of the selection. */
+  toggleSelectedModel: (modelId: string) => void;
   createFolder: (parentFolderId?: string | null, name?: string) => string;
   deleteFolder: (folderId: string) => void;
   renameFolder: (folderId: string, name: string) => void;
@@ -79,12 +88,25 @@ type CasesContextValue = {
   ) => void;
   /** Append a brand-new turn (Q with no answer yet) and return its id. */
   appendTurn: (caseId: string, turn: CaseTurn) => void;
-  /** Patch fields on one turn (e.g. attach an answer, mark cancelled). */
+  /** Patch fields on one turn (e.g. mark cancelled, set best branch). */
   updateTurn: (
     caseId: string,
     turnId: string,
     patch: Partial<CaseTurn>,
   ) => void;
+  /**
+   * Patch ONE branch of a turn (e.g. when its parallel /api/extract call
+   * returns). Auto-recomputes the turn's aggregate status from the new
+   * branch states.
+   */
+  updateTurnBranch: (
+    caseId: string,
+    turnId: string,
+    modelId: string,
+    patch: Partial<TurnBranch>,
+  ) => void;
+  /** Mark the user's preferred branch for a turn. */
+  setBestBranch: (caseId: string, turnId: string, modelId: string) => void;
 };
 
 const CasesContext = React.createContext<CasesContextValue | null>(null);
@@ -125,23 +147,35 @@ function migrateFolders(folders: Folder[]): Folder[] {
 }
 
 function loadInitial(): StoredState {
-  if (typeof window === "undefined") {
-    return { folders: [], currentCaseId: null, selectedModelId: null };
-  }
+  const empty: StoredState = {
+    folders: [],
+    currentCaseId: null,
+    selectedModelIds: [...DEFAULT_SELECTED_MODEL_IDS],
+  };
+  if (typeof window === "undefined") return empty;
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return { folders: [], currentCaseId: null, selectedModelId: null };
-    const parsed = JSON.parse(raw) as StoredState;
-    if (!parsed || !Array.isArray(parsed.folders)) {
-      return { folders: [], currentCaseId: null, selectedModelId: null };
-    }
+    if (!raw) return empty;
+    // Older payloads used `selectedModelId: string | null`. The multi-model
+    // refactor stores `selectedModelIds: string[]`. Detect either and
+    // migrate to the new shape with `safeModelIds` (which also drops
+    // models that are no longer in the registry).
+    const parsed = JSON.parse(raw) as Partial<StoredState> & {
+      selectedModelId?: string | null;
+    };
+    if (!parsed || !Array.isArray(parsed.folders)) return empty;
+    const ids = Array.isArray(parsed.selectedModelIds)
+      ? parsed.selectedModelIds
+      : parsed.selectedModelId
+        ? [parsed.selectedModelId]
+        : [];
     return {
       folders: migrateFolders(parsed.folders),
       currentCaseId: parsed.currentCaseId ?? null,
-      selectedModelId: parsed.selectedModelId ?? null,
+      selectedModelIds: safeModelIds(ids),
     };
   } catch {
-    return { folders: [], currentCaseId: null, selectedModelId: null };
+    return empty;
   }
 }
 
@@ -284,7 +318,7 @@ export function CasesProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = React.useState<StoredState>({
     folders: [],
     currentCaseId: null,
-    selectedModelId: null,
+    selectedModelIds: [...DEFAULT_SELECTED_MODEL_IDS],
   });
   const [hydrated, setHydrated] = React.useState(false);
 
@@ -426,50 +460,105 @@ export function CasesProvider({ children }: { children: React.ReactNode }) {
     [],
   );
 
+  /**
+   * Compute a turn's aggregate status from its branches:
+   *  - "pending"   if any branch is still pending
+   *  - "complete"  if all branches are terminal AND at least one is complete
+   *  - "cancelled" if all terminal branches are cancelled
+   *  - "error"     if all terminal branches errored
+   */
+  function deriveTurnStatus(branches: TurnBranch[]): CaseTurn["status"] {
+    if (branches.length === 0) return "pending";
+    if (branches.some((b) => b.status === "pending")) return "pending";
+    if (branches.some((b) => b.status === "complete")) return "complete";
+    if (branches.every((b) => b.status === "cancelled")) return "cancelled";
+    return "error";
+  }
+
   const updateTurn = React.useCallback(
     (caseId: string, turnId: string, patch: Partial<CaseTurn>) => {
       setState((s) => ({
         ...s,
         folders: mapFolders(s.folders, (f) => ({
           ...f,
+          cases: f.cases.map((c) =>
+            c.id !== caseId
+              ? c
+              : {
+                  ...c,
+                  turns: (c.turns ?? []).map((t) =>
+                    t.id === turnId ? { ...t, ...patch } : t,
+                  ),
+                  updatedAt: nowIso(),
+                },
+          ),
+        })),
+      }));
+    },
+    [],
+  );
+
+  const updateTurnBranch = React.useCallback(
+    (
+      caseId: string,
+      turnId: string,
+      modelId: string,
+      patch: Partial<TurnBranch>,
+    ) => {
+      setState((s) => ({
+        ...s,
+        folders: mapFolders(s.folders, (f) => ({
+          ...f,
           cases: f.cases.map((c) => {
             if (c.id !== caseId) return c;
-            const turns = (c.turns ?? []).map((t) => {
-              if (t.id !== turnId) return t;
-              // Functional-patch support for moaProgress: callers (the chat
-              // input's stream handler) can pass a function that receives the
-              // PREVIOUS moaProgress and returns the next. This lets stream
-              // events merge correctly without each call needing to read
-              // state first.
-              const moaProgressPatch = patch.moaProgress;
-              const resolvedMoaProgress =
-                typeof moaProgressPatch === "function"
-                  ? (
-                      moaProgressPatch as unknown as (
-                        prev: CaseTurn["moaProgress"],
-                      ) => CaseTurn["moaProgress"]
-                    )(t.moaProgress)
-                  : moaProgressPatch;
-              return {
-                ...t,
-                ...patch,
-                ...(moaProgressPatch !== undefined
-                  ? { moaProgress: resolvedMoaProgress }
-                  : {}),
-              };
-            });
-            // Mirror the LATEST completed turn's answer onto the case-level
-            // fields so legacy readers (CaseDashboard) keep working.
-            const latest = turns[turns.length - 1];
-            const mirror =
-              latest && latest.status === "complete"
-                ? {
-                    elements: latest.elements ?? c.elements,
-                    matches: latest.matches ?? c.matches,
-                  }
-                : {};
-            return { ...c, turns, ...mirror, updatedAt: nowIso() };
+            return {
+              ...c,
+              turns: (c.turns ?? []).map((t) => {
+                if (t.id !== turnId) return t;
+                const branches = (t.branches ?? []).map((b) =>
+                  b.modelId === modelId ? { ...b, ...patch } : b,
+                );
+                return {
+                  ...t,
+                  branches,
+                  status: deriveTurnStatus(branches),
+                };
+              }),
+              updatedAt: nowIso(),
+            };
           }),
+        })),
+      }));
+    },
+    [],
+  );
+
+  const setBestBranch = React.useCallback(
+    (caseId: string, turnId: string, modelId: string) => {
+      setState((s) => ({
+        ...s,
+        folders: mapFolders(s.folders, (f) => ({
+          ...f,
+          cases: f.cases.map((c) =>
+            c.id !== caseId
+              ? c
+              : {
+                  ...c,
+                  turns: (c.turns ?? []).map((t) =>
+                    t.id === turnId
+                      ? {
+                          ...t,
+                          // Toggle: clicking the same model twice un-stars it.
+                          bestBranchModelId:
+                            t.bestBranchModelId === modelId
+                              ? undefined
+                              : modelId,
+                        }
+                      : t,
+                  ),
+                  updatedAt: nowIso(),
+                },
+          ),
         })),
       }));
     },
@@ -492,8 +581,23 @@ export function CasesProvider({ children }: { children: React.ReactNode }) {
     [state.folders, state.currentCaseId],
   );
 
-  const setSelectedModelId = React.useCallback((modelId: string) => {
-    setState((s) => ({ ...s, selectedModelId: modelId }));
+  const setSelectedModelIds = React.useCallback((modelIds: string[]) => {
+    setState((s) => ({ ...s, selectedModelIds: safeModelIds(modelIds) }));
+  }, []);
+
+  const toggleSelectedModel = React.useCallback((modelId: string) => {
+    setState((s) => {
+      const current = new Set(s.selectedModelIds);
+      if (current.has(modelId)) {
+        // Don't allow emptying the selection — at least one model must
+        // remain so Send always has something to call.
+        if (current.size <= 1) return s;
+        current.delete(modelId);
+      } else {
+        current.add(modelId);
+      }
+      return { ...s, selectedModelIds: safeModelIds(Array.from(current)) };
+    });
   }, []);
 
   const value: CasesContextValue = {
@@ -501,8 +605,9 @@ export function CasesProvider({ children }: { children: React.ReactNode }) {
     currentCaseId: state.currentCaseId,
     currentCase,
     currentFolderId,
-    selectedModelId: state.selectedModelId,
-    setSelectedModelId,
+    selectedModelIds: state.selectedModelIds,
+    setSelectedModelIds,
+    toggleSelectedModel,
     createFolder,
     deleteFolder,
     renameFolder,
@@ -513,6 +618,8 @@ export function CasesProvider({ children }: { children: React.ReactNode }) {
     updateCase,
     appendTurn,
     updateTurn,
+    updateTurnBranch,
+    setBestBranch,
   };
 
   return (

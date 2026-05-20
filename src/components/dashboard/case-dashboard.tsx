@@ -56,14 +56,18 @@ export default CaseDashboard;
 /* -------------------------------------------------------------------------- */
 
 function CaseDashboardFromContext({ fallback }: { fallback: CaseDashboardProps }): React.ReactElement {
-  const { currentCase, selectedModelId } = useCases();
+  const { currentCase, selectedModelIds } = useCases();
+  // The dashboard sub-tabs (summarize / detailed / why) all hit single-model
+  // endpoints, so use the FIRST selected model when the user has multiple.
+  // The conversation thread is where multi-model comparison happens.
+  const modelId = selectedModelIds[0];
   return (
     <CaseDashboardBody
       caseFileId={currentCase?.id ?? fallback.caseFileId}
       narrative={currentCase?.narrative ?? fallback.narrative}
       elements={currentCase?.elements ?? fallback.elements}
       matches={currentCase?.matches ?? fallback.matches}
-      modelId={selectedModelId ?? undefined}
+      modelId={modelId ?? undefined}
     />
   );
 }

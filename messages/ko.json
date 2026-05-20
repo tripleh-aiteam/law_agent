@@ -159,16 +159,11 @@
     "hideDetails": "접기",
     "emptyThread": "왼쪽에서 사건을 선택하거나 아래에 질문을 입력하세요.",
     "noMatchesForTurn": "이 질문에서는 유사한 판례를 찾지 못했습니다.",
-    "moaBadge": "Mixture-of-Agents · {ok}/{total} 모델 합의",
-    "moaStageFanning": "3개 모델이 동시에 분석 중...",
-    "moaStageAggregating": "최종 답을 종합 중...",
-    "moaStageDone": "완료",
-    "moaSynthesizing": "종합",
-    "moaAggregator": "통합 모델",
-    "moaRunning": "{sec}초 경과",
-    "moaDone": "완료",
-    "moaFailed": "실패",
-    "moaSynthesized": "최종 답 종합 완료"
+    "thinkingN": "{count}개 모델 분석 중...",
+    "nModelsComparing": "{count}개 모델 비교",
+    "markBest": "최고 답으로 표시",
+    "unmarkBest": "표시 해제",
+    "bestAnswer": "★ 최고 답"
   },
   "chips": {
     "summarize": {
@@ -198,6 +193,9 @@
     "toggleLocale": "언어 전환",
     "settings": "설정",
     "modelSelector": "AI 모델 선택",
-    "modelSelectorHint": "분석 품질에 영향을 줍니다. Premium 모델일수록 한국어 법률 추론이 정교합니다."
+    "modelSelectorHint": "분석 품질에 영향을 줍니다. Premium 모델일수록 한국어 법률 추론이 정교합니다.",
+    "modelSelectorMultiHint": "여러 모델을 선택하면 각 모델이 동시에 답하고, 사용자가 직접 최고 답을 고를 수 있습니다.",
+    "modelSelectorMultiLabel": "{count}개 모델 비교",
+    "modelSelectorSelected": "{count}개 선택됨"
   }
 }

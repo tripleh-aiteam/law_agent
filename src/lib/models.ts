@@ -1,38 +1,20 @@
 /**
- * LLM model registry — the set of models the user can pick from in the
- * Model Selector dropdown. Every model is referenced as a Vercel AI Gateway
- * provider/model string so calls flow through the Pro AI Gateway credits.
+ * LLM model registry — exactly 7 strongest models for Korean legal work.
  *
- * IDs MUST match the canonical form returned by
- *   GET https://ai-gateway.vercel.sh/v1/models
+ * Design decisions (pinned by user):
+ *   - ONLY models from providers where the user has direct billing credit
+ *     (Anthropic, OpenAI, Google). No xAI/DeepSeek/Meta/Mistral here —
+ *     those need the Vercel AI Gateway which is currently empty.
+ *   - No Mixture-of-Agents — user picks 1+ models themselves and compares
+ *     the parallel results to choose the best. Machine doesn't aggregate.
+ *   - Money is not the constraint; accuracy is. Even the "cheap" entries
+ *     are premium-tier within their family.
  *
- * Anthropic / Google / xAI / DeepSeek / OpenAI all use DOT-separated
- * versions (e.g. `claude-opus-4.7`, NOT `claude-opus-4-7`). The gateway
- * silently aliases the dash form for the most common Anthropic IDs but
- * NOT for xAI — that's why our previous `xai/grok-4` failed with
- * "Model 'xai/grok-4' not found". The flagship is `xai/grok-4.3`.
- *
- * Each entry includes:
- *   - id          : gateway model ID (verified against the live catalog)
- *   - displayName : short human label shown in the UI
- *   - family      : brand grouping (used to render section headers)
- *   - tier        : "premium" | "balanced" | "fast"  — speed/cost shorthand
- *   - description : one-line hint for the tooltip
- *   - korean      : informal note about Korean legal text quality (0–5)
- *   - experimental: optional flag for models known to occasionally return
- *                   malformed JSON on our complex structured-output schema
+ * IDs match the canonical Vercel AI Gateway form so the same registry
+ * works for direct AND gateway paths (resolve-model.ts handles routing).
  */
 
-export type ModelFamily =
-  | "auto"
-  | "anthropic"
-  | "openai"
-  | "google"
-  | "xai"
-  | "deepseek"
-  | "meta"
-  | "mistral"
-  | "groq";
+export type ModelFamily = "anthropic" | "openai" | "google";
 
 export type ModelTier = "premium" | "balanced" | "fast";
 
@@ -43,137 +25,20 @@ export interface ModelOption {
   tier: ModelTier;
   description: string;
   korean: 1 | 2 | 3 | 4 | 5;
-  /** True when the model is known to occasionally fail strict JSON-schema mode. */
+  /** True when the model occasionally returns malformed JSON on our schema. */
   experimental?: boolean;
 }
 
-/**
- * The special Mixture-of-Agents model. Selecting this fans the same prompt
- * out to several strong models in parallel and uses Claude Opus 4.7 as an
- * aggregator to synthesize the final answer. See `src/lib/moa.ts`.
- */
-export const MOA_MODEL_ID = "auto/mixture-of-agents";
-
-/**
- * The candidate roster for Mixture-of-Agents. FREE MODE — every entry runs
- * on Groq's free tier with verified strict-json_schema support, so MoA
- * queries cost $0 even with the Vercel AI Gateway empty.
- *
- *   1. OpenAI GPT-OSS 120B  — OpenAI's open-weight flagship via Groq.
- *                              Strongest free reasoning, reliable JSON.
- *   2. OpenAI GPT-OSS 20B   — Smaller OpenAI open-weight variant.
- *                              Different tier from 120B catches different
- *                              issues even in the same family.
- *   3. Meta Llama 4 Scout   — Meta's multimodal Llama 4. Verified
- *                              json_schema support (proven in production).
- *   4. Moonshot Kimi K2     — Different family entirely. Strong CJK
- *                              (Korean / Chinese / Japanese), 1M context.
- *
- * All run via DIRECT Groq API (GROQ_API_KEY), NOT the Vercel AI Gateway,
- * so they don't touch the empty gateway credit balance. Older Groq
- * models that only support loose `json_object` were excluded — those
- * fail our strict legal-elements schema.
- */
-export const MOA_ROSTER: readonly string[] = [
-  "groq/openai/gpt-oss-120b",
-  "groq/openai/gpt-oss-20b",
-  "groq/meta-llama/llama-4-scout-17b-16e-instruct",
-  "groq/moonshotai/kimi-k2-instruct",
-];
-
-/**
- * The aggregator model that synthesizes the candidate outputs.
- *
- * HYBRID MODE: candidates fan out on free providers (Groq + Gemini), but
- * the aggregator runs on Claude Sonnet 4.6 via the user's DIRECT
- * Anthropic key — separate billing from the (currently empty) Vercel AI
- * Gateway prepaid balance, so it draws from the user's $20 direct
- * Anthropic credit instead.
- *
- * Why Sonnet 4.6 specifically:
- *   - ~$0.03 per aggregator call → ~666 MoA queries from $20.
- *   - Best Korean legal nuance / cost ratio in the Anthropic family.
- *   - Different family from every free candidate (Llama / Qwen / Gemini),
- *     so the meta-judgment is genuinely cross-vendor with no self-bias.
- *
- * If the user tops up the gateway and wants to swap back, set this to
- * "openai/gpt-5.5" for the previous neutral-judge config, or
- * "anthropic/claude-opus-4.7" for the original premium default.
- */
-export const MOA_AGGREGATOR_MODEL_ID = "anthropic/claude-sonnet-4.6";
-
-/** Selectable models. Order matters — the UI renders them in this order. */
+/** The 7 strongest models. Order = display order in the selector. */
 export const MODEL_OPTIONS: ModelOption[] = [
-  // ─── Mixture-of-Agents (pinned to the top of the selector) ─────────
-  {
-    id: MOA_MODEL_ID,
-    displayName: "Mixture-of-Agents",
-    family: "auto",
-    tier: "premium",
-    description:
-      "HYBRID: 4 FREE candidates (GPT-OSS 120B + GPT-OSS 20B + Llama 4 Scout + Kimi K2) fan out via Groq direct, then Claude Sonnet 4.6 synthesizes via your direct Anthropic key (~$0.03/query, ~666 queries from $20). Best Korean legal quality at near-free cost.",
-    korean: 5,
-  },
-  // ─── Groq (FREE TIER — direct API, bypasses paid gateway) ──────────
-  // ONLY models that support strict `response_format: json_schema` are
-  // listed. Older Groq models (llama-3.3-70b, llama-3.1-8b, qwen-3-32b)
-  // only support loose `json_object` mode which fails our LegalElements
-  // schema validation, so they were dropped from this registry.
-  // Groq's free tier serves these at very high speed (~500 tok/s).
-  {
-    id: "groq/openai/gpt-oss-120b",
-    displayName: "GPT-OSS 120B (OpenAI)",
-    family: "groq",
-    tier: "balanced",
-    description:
-      "FREE via Groq. OpenAI's open-weight 120B model. Strong reasoning + reliable strict JSON. Best free OpenAI option.",
-    korean: 3,
-  },
-  {
-    id: "groq/openai/gpt-oss-20b",
-    displayName: "GPT-OSS 20B (OpenAI)",
-    family: "groq",
-    tier: "fast",
-    description:
-      "FREE via Groq. Smaller OpenAI open-weight model — fast, supports strict JSON. Good for high-volume.",
-    korean: 3,
-  },
-  {
-    id: "groq/meta-llama/llama-4-scout-17b-16e-instruct",
-    displayName: "Llama 4 Scout",
-    family: "groq",
-    tier: "fast",
-    description:
-      "FREE via Groq. Meta Llama 4 Scout, supports strict json_schema. Fast multilingual.",
-    korean: 3,
-  },
-  {
-    id: "groq/meta-llama/llama-4-maverick-17b-128e-instruct",
-    displayName: "Llama 4 Maverick",
-    family: "groq",
-    tier: "balanced",
-    description:
-      "FREE via Groq. Meta Llama 4 Maverick — larger 128-expert variant. Strict JSON. Better reasoning than Scout.",
-    korean: 3,
-  },
-  {
-    id: "groq/moonshotai/kimi-k2-instruct",
-    displayName: "Kimi K2 (Moonshot)",
-    family: "groq",
-    tier: "premium",
-    description:
-      "FREE via Groq. Moonshot's flagship — strong CJK languages, 1M context, supports strict json_schema.",
-    korean: 4,
-  },
-
-  // ─── Anthropic Claude ───────────────────────────────────────────────
+  // ─── Anthropic Claude (best Korean legal nuance) ─────────────────────
   {
     id: "anthropic/claude-opus-4.7",
     displayName: "Claude Opus 4.7",
     family: "anthropic",
     tier: "premium",
     description:
-      "Anthropic's strongest reasoning model. Best for nuanced Korean legal analysis, complex citability judgments.",
+      "Anthropic's flagship. Gold standard for Korean legal reasoning — deepest nuance, most careful citability judgments. ~$0.25/query.",
     korean: 5,
   },
   {
@@ -182,43 +47,18 @@ export const MODEL_OPTIONS: ModelOption[] = [
     family: "anthropic",
     tier: "balanced",
     description:
-      "Balanced Anthropic model — excellent Korean legal handling at ~5× lower cost than Opus.",
-    korean: 5,
-  },
-  {
-    id: "anthropic/claude-haiku-4.5",
-    displayName: "Claude Haiku 4.5",
-    family: "anthropic",
-    tier: "fast",
-    description:
-      "Fast, cheap Anthropic model. Strong for quick element extraction; legal nuance is shallower than Sonnet.",
-    korean: 4,
-  },
-  {
-    id: "anthropic/claude-opus-4.6",
-    displayName: "Claude Opus 4.6",
-    family: "anthropic",
-    tier: "premium",
-    description: "Prior-generation Opus. Useful for A/B against 4.7.",
-    korean: 5,
-  },
-  {
-    id: "anthropic/claude-sonnet-4.5",
-    displayName: "Claude Sonnet 4.5",
-    family: "anthropic",
-    tier: "balanced",
-    description: "Prior-generation Sonnet. Useful for A/B against 4.6.",
+      "~90% of Opus quality at 1/5 the cost. Excellent Korean legal handling. Best value model. ~$0.05/query.",
     korean: 5,
   },
 
-  // ─── OpenAI ─────────────────────────────────────────────────────────
+  // ─── OpenAI (strongest reasoning + most reliable structured output) ──
   {
     id: "openai/gpt-5.5",
     displayName: "GPT-5.5",
     family: "openai",
     tier: "premium",
     description:
-      "OpenAI's flagship. Best overall reasoning + structured output reliability.",
+      "OpenAI flagship. Strongest reasoning + most reliable structured output across providers. Strong Korean. ~$0.07/query.",
     korean: 5,
   },
   {
@@ -226,31 +66,17 @@ export const MODEL_OPTIONS: ModelOption[] = [
     displayName: "GPT-5.5 Pro",
     family: "openai",
     tier: "premium",
-    description: "Higher-compute GPT-5.5 variant for hardest tasks.",
+    description:
+      "Higher-compute GPT-5.5 variant. Use for the hardest cases where you want maximum deliberation. ~$0.15/query.",
     korean: 5,
   },
   {
-    id: "openai/gpt-5.4",
-    displayName: "GPT-5.4",
+    id: "openai/o3-pro",
+    displayName: "o3-pro",
     family: "openai",
     tier: "premium",
-    description: "Prior flagship — still extremely capable, slightly cheaper than 5.5.",
-    korean: 5,
-  },
-  {
-    id: "openai/gpt-5.4-mini",
-    displayName: "GPT-5.4 mini",
-    family: "openai",
-    tier: "balanced",
-    description: "Mid-tier GPT-5.4. Solid Korean, much cheaper than full 5.4.",
-    korean: 4,
-  },
-  {
-    id: "openai/gpt-5.4-nano",
-    displayName: "GPT-5.4 nano",
-    family: "openai",
-    tier: "fast",
-    description: "Cheapest GPT-5.4 variant. Fast, good for short queries.",
+    description:
+      "Deep chain-of-thought reasoning specialist. Best for complex multi-step legal analysis. Slower but very thorough. ~$0.20/query.",
     korean: 4,
   },
   {
@@ -259,265 +85,80 @@ export const MODEL_OPTIONS: ModelOption[] = [
     family: "openai",
     tier: "premium",
     description:
-      "Reliable older flagship. Excellent structured output, strong Korean.",
+      "Proven reliable workhorse. Older flagship but extremely well-tested. Excellent JSON-mode reliability. ~$0.07/query.",
     korean: 5,
   },
-  {
-    id: "openai/gpt-4o-mini",
-    displayName: "GPT-4o mini",
-    family: "openai",
-    tier: "fast",
-    description: "Cheap, fast OpenAI. Best price/quality for high-volume use.",
-    korean: 4,
-  },
-  {
-    id: "openai/o3",
-    displayName: "o3",
-    family: "openai",
-    tier: "premium",
-    description:
-      "OpenAI's reasoning model. Best for multi-step legal analysis; higher latency.",
-    korean: 4,
-  },
-  {
-    id: "openai/o3-mini",
-    displayName: "o3-mini",
-    family: "openai",
-    tier: "balanced",
-    description: "Cheaper reasoning model. Good balance of cost and depth.",
-    korean: 4,
-  },
-  {
-    id: "openai/o3-pro",
-    displayName: "o3-pro",
-    family: "openai",
-    tier: "premium",
-    description: "Heavyweight reasoning. Slow but very thorough on complex cases.",
-    korean: 4,
-  },
-  {
-    id: "openai/o4-mini",
-    displayName: "o4-mini",
-    family: "openai",
-    tier: "balanced",
-    description: "Next-gen reasoning, cheaper variant.",
-    korean: 4,
-  },
 
-  // ─── xAI Grok ───────────────────────────────────────────────────────
-  {
-    id: "xai/grok-4.3",
-    displayName: "Grok 4.3",
-    family: "xai",
-    tier: "premium",
-    description:
-      "xAI's current flagship. Strong tool-use and structured output; weaker Korean nuance than Claude/GPT but useful for diverse-viewpoint ensembles.",
-    korean: 3,
-  },
-  {
-    id: "xai/grok-4.20-reasoning",
-    displayName: "Grok 4.20 (reasoning)",
-    family: "xai",
-    tier: "premium",
-    description: "Reasoning variant of Grok 4.20 — deeper analysis, slower.",
-    korean: 3,
-  },
-  {
-    id: "xai/grok-4.20-non-reasoning",
-    displayName: "Grok 4.20",
-    family: "xai",
-    tier: "balanced",
-    description: "Non-reasoning Grok 4.20 — faster, lower cost.",
-    korean: 3,
-  },
-  {
-    id: "xai/grok-4.1-fast-reasoning",
-    displayName: "Grok 4.1 Fast (reasoning)",
-    family: "xai",
-    tier: "fast",
-    description: "Cheaper xAI option with reasoning enabled.",
-    korean: 3,
-  },
-
-  // ─── DeepSeek ───────────────────────────────────────────────────────
-  {
-    id: "deepseek/deepseek-v4-pro",
-    displayName: "DeepSeek V4 Pro",
-    family: "deepseek",
-    tier: "premium",
-    description:
-      "DeepSeek's flagship. Strong Korean handling at very low cost.",
-    korean: 4,
-  },
-  {
-    id: "deepseek/deepseek-v3.2",
-    displayName: "DeepSeek V3.2",
-    family: "deepseek",
-    tier: "balanced",
-    description: "Newer mid-tier DeepSeek. Solid balance of cost and quality.",
-    korean: 4,
-  },
-  {
-    id: "deepseek/deepseek-v3",
-    displayName: "DeepSeek V3",
-    family: "deepseek",
-    tier: "balanced",
-    description: "Open-weight V3. Very cost-efficient.",
-    korean: 4,
-  },
-  {
-    id: "deepseek/deepseek-r1",
-    displayName: "DeepSeek R1",
-    family: "deepseek",
-    tier: "premium",
-    description: "DeepSeek's reasoning model. Strong analytical depth.",
-    korean: 4,
-  },
-
-  // ─── Google Gemini (experimental on JSON-schema mode) ───────────────
+  // ─── Google Gemini (cross-vendor viewpoint) ──────────────────────────
   {
     id: "google/gemini-3.1-pro-preview",
     displayName: "Gemini 3.1 Pro Preview",
     family: "google",
     tier: "premium",
     description:
-      "Google's newest flagship preview. Excellent long-context. JSON-schema mode is sometimes flaky — we'll retry on failure.",
+      "Google's flagship preview. Different vendor than Anthropic/OpenAI — cross-checks the dominant axis. Needs GOOGLE_GENERATIVE_AI_API_KEY on Vercel. ~$0.04/query.",
     korean: 4,
     experimental: true,
-  },
-  {
-    id: "google/gemini-3-pro-preview",
-    displayName: "Gemini 3 Pro Preview",
-    family: "google",
-    tier: "premium",
-    description: "Gemini 3 flagship preview. Strong on Korean long-context.",
-    korean: 4,
-    experimental: true,
-  },
-  {
-    id: "google/gemini-2.5-pro",
-    displayName: "Gemini 2.5 Pro",
-    family: "google",
-    tier: "premium",
-    description: "Stable Gemini flagship. Long-context Korean documents.",
-    korean: 4,
-    experimental: true,
-  },
-  {
-    id: "google/gemini-3.5-flash",
-    displayName: "Gemini 3.5 Flash",
-    family: "google",
-    tier: "fast",
-    description:
-      "Newest fast Gemini — 1M context, vision, tool-use, reasoning. Fast and cheap; JSON-schema mode much improved over 2.5.",
-    korean: 4,
-    experimental: true,
-  },
-  {
-    id: "google/gemini-2.5-flash",
-    displayName: "Gemini 2.5 Flash",
-    family: "google",
-    tier: "fast",
-    description:
-      "Fast Gemini. Good for quick summaries; structured output ~70% reliable.",
-    korean: 4,
-    experimental: true,
-  },
-  {
-    id: "google/gemini-3.1-flash-lite",
-    displayName: "Gemini 3.1 Flash Lite",
-    family: "google",
-    tier: "fast",
-    description: "Cheapest current Gemini. Useful for high-volume light tasks.",
-    korean: 4,
-    experimental: true,
-  },
-
-  // ─── Meta Llama ─────────────────────────────────────────────────────
-  {
-    id: "meta/llama-4-maverick",
-    displayName: "Llama 4 Maverick",
-    family: "meta",
-    tier: "balanced",
-    description: "Larger Llama 4 variant. Better reasoning at modest cost.",
-    korean: 3,
-  },
-  {
-    id: "meta/llama-4-scout",
-    displayName: "Llama 4 Scout",
-    family: "meta",
-    tier: "fast",
-    description: "Meta's small Llama 4. Multilingual; fast and inexpensive.",
-    korean: 3,
-  },
-  {
-    id: "meta/llama-3.3-70b",
-    displayName: "Llama 3.3 70B",
-    family: "meta",
-    tier: "balanced",
-    description: "Stable previous-gen Meta. Reliable, well-tested.",
-    korean: 3,
-  },
-
-  // ─── Mistral ────────────────────────────────────────────────────────
-  {
-    id: "mistral/mistral-large-3",
-    displayName: "Mistral Large 3",
-    family: "mistral",
-    tier: "balanced",
-    description:
-      "Mistral's flagship. Decent multilingual reasoning; weaker Korean than Claude/GPT.",
-    korean: 3,
-  },
-  {
-    id: "mistral/mistral-medium-3.5",
-    displayName: "Mistral Medium 3.5",
-    family: "mistral",
-    tier: "balanced",
-    description: "Mid-size Mistral. Good cost balance.",
-    korean: 3,
   },
 ];
 
-/**
- * Default model — used when the user hasn't selected one yet.
- *
- * FREE MODE: GPT-OSS 120B via Groq direct API. Best free model with
- * verified strict-json_schema support. Avoids the empty Vercel AI Gateway
- * AND avoids the Gemini direct path (which requires
- * GOOGLE_GENERATIVE_AI_API_KEY on Vercel — not just .env.local).
- *
- * When the user tops up gateway credit OR sets GOOGLE_GENERATIVE_AI_API_KEY
- * on Vercel, this can switch back to "anthropic/claude-sonnet-4.6" or
- * "google/gemini-2.5-flash".
- */
-export const DEFAULT_MODEL_ID = "groq/openai/gpt-oss-120b";
+/** Default model when none selected — best price/quality. */
+export const DEFAULT_MODEL_ID = "anthropic/claude-sonnet-4.6";
+
+/** Default multi-selection — Sonnet only on first load. */
+export const DEFAULT_SELECTED_MODEL_IDS: readonly string[] = [DEFAULT_MODEL_ID];
 
 const MODEL_BY_ID = new Map(MODEL_OPTIONS.map((m) => [m.id, m]));
 
 /**
- * Back-compat: older localStorage payloads may carry dash-style IDs
- * (`anthropic/claude-sonnet-4-6`) from before we switched to the canonical
- * dot form. Map them onto the current canonical IDs so users don't lose
- * their model selection across deploys.
+ * Back-compat: map old model IDs (from prior deploys' localStorage) onto
+ * the 7-model roster so the user's saved selection doesn't break across
+ * the migration.
  */
 const LEGACY_ID_ALIASES: Record<string, string> = {
+  // Dash-form Anthropic IDs (gateway used to accept these)
   "anthropic/claude-opus-4-7": "anthropic/claude-opus-4.7",
   "anthropic/claude-sonnet-4-6": "anthropic/claude-sonnet-4.6",
-  "anthropic/claude-haiku-4-5": "anthropic/claude-haiku-4.5",
-  "anthropic/claude-opus-4-6": "anthropic/claude-opus-4.6",
-  "anthropic/claude-sonnet-4-5": "anthropic/claude-sonnet-4.5",
-  "xai/grok-4": "xai/grok-4.3",
-  "xai/grok-4-heavy": "xai/grok-4.20-reasoning",
-  "deepseek/deepseek-v3": "deepseek/deepseek-v3",
-  "deepseek/deepseek-r1": "deepseek/deepseek-r1",
-  "mistral/mistral-large": "mistral/mistral-large-3",
-  "moonshot/kimi-k2": "groq/moonshotai/kimi-k2-instruct",
-  // Removed Groq models that lack strict json_schema support — auto-migrate
-  // selections to working alternatives so the user doesn't get a broken UI.
-  "groq/llama-3.3-70b-versatile": "groq/meta-llama/llama-4-scout-17b-16e-instruct",
-  "groq/llama-3.1-8b-instant": "groq/openai/gpt-oss-20b",
-  "groq/qwen/qwen3-32b": "groq/moonshotai/kimi-k2-instruct",
+  // Models removed from the 7-LLM roster — map to nearest equivalent
+  "anthropic/claude-haiku-4-5": "anthropic/claude-sonnet-4.6",
+  "anthropic/claude-haiku-4.5": "anthropic/claude-sonnet-4.6",
+  "anthropic/claude-opus-4-6": "anthropic/claude-opus-4.7",
+  "anthropic/claude-opus-4.6": "anthropic/claude-opus-4.7",
+  "anthropic/claude-sonnet-4-5": "anthropic/claude-sonnet-4.6",
+  "anthropic/claude-sonnet-4.5": "anthropic/claude-sonnet-4.6",
+  "openai/gpt-4o-mini": "openai/gpt-4o",
+  "openai/o3": "openai/o3-pro",
+  "openai/o3-mini": "openai/o3-pro",
+  "openai/o1": "openai/o3-pro",
+  "openai/o4-mini": "openai/o3-pro",
+  "openai/gpt-5.4": "openai/gpt-5.5",
+  "openai/gpt-5.4-mini": "openai/gpt-5.5",
+  "openai/gpt-5.4-nano": "openai/gpt-5.5",
+  "google/gemini-2.5-pro": "google/gemini-3.1-pro-preview",
+  "google/gemini-2.5-flash": "google/gemini-3.1-pro-preview",
+  "google/gemini-3.5-flash": "google/gemini-3.1-pro-preview",
+  "google/gemini-3-pro-preview": "google/gemini-3.1-pro-preview",
+  "google/gemini-3.1-flash-lite": "google/gemini-3.1-pro-preview",
+  // Mixture-of-Agents was removed entirely — fall back to Claude Sonnet
+  "auto/mixture-of-agents": "anthropic/claude-sonnet-4.6",
+  // Groq / xAI / DeepSeek / Meta / Mistral all removed
+  "groq/openai/gpt-oss-120b": "openai/gpt-4o",
+  "groq/openai/gpt-oss-20b": "openai/gpt-4o",
+  "groq/meta-llama/llama-4-scout-17b-16e-instruct": "openai/gpt-4o",
+  "groq/meta-llama/llama-4-maverick-17b-128e-instruct": "openai/gpt-4o",
+  "groq/moonshotai/kimi-k2-instruct": "anthropic/claude-sonnet-4.6",
+  "groq/llama-3.3-70b-versatile": "openai/gpt-4o",
+  "groq/llama-3.1-8b-instant": "openai/gpt-4o",
+  "groq/qwen/qwen3-32b": "anthropic/claude-sonnet-4.6",
+  "xai/grok-4": "anthropic/claude-sonnet-4.6",
+  "xai/grok-4-heavy": "anthropic/claude-sonnet-4.6",
+  "xai/grok-4.3": "anthropic/claude-sonnet-4.6",
+  "deepseek/deepseek-v3": "anthropic/claude-sonnet-4.6",
+  "deepseek/deepseek-r1": "openai/o3-pro",
+  "deepseek/deepseek-v4-pro": "anthropic/claude-sonnet-4.6",
+  "mistral/mistral-large": "openai/gpt-4o",
+  "mistral/mistral-large-3": "openai/gpt-4o",
+  "moonshot/kimi-k2": "anthropic/claude-sonnet-4.6",
 };
 
 function canonicalizeId(id: string | null | undefined): string | null {
@@ -533,36 +174,34 @@ export function resolveModel(id: string | null | undefined): ModelOption {
   return MODEL_BY_ID.get(DEFAULT_MODEL_ID)!;
 }
 
-/**
- * Validate a model ID, returning a safe model ID for backend use.
- *
- * MoA is NOT a real upstream model — it's a wrapper. Any caller that asks
- * `safeModelId` to validate "auto/mixture-of-agents" wants a real model to
- * send to the AI SDK, so we substitute the default here.
- */
+/** Validate a model ID, returning a safe model ID for backend use. */
 export function safeModelId(input: string | null | undefined): string {
-  if (input === MOA_MODEL_ID) return DEFAULT_MODEL_ID;
   const canonical = canonicalizeId(input);
   if (canonical && MODEL_BY_ID.has(canonical)) return canonical;
   return DEFAULT_MODEL_ID;
 }
 
-/** True iff the given id is the Mixture-of-Agents pseudo-model. */
-export function isMoaModelId(id: string | null | undefined): boolean {
-  return id === MOA_MODEL_ID;
+/** Canonicalize + dedupe an array of model IDs against the registry. */
+export function safeModelIds(input: readonly string[] | null | undefined): string[] {
+  if (!input || input.length === 0) return [...DEFAULT_SELECTED_MODEL_IDS];
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const raw of input) {
+    const c = canonicalizeId(raw);
+    if (c && MODEL_BY_ID.has(c) && !seen.has(c)) {
+      seen.add(c);
+      result.push(c);
+    }
+  }
+  // If migration cleared everything, fall back to default rather than empty.
+  return result.length > 0 ? result : [...DEFAULT_SELECTED_MODEL_IDS];
 }
 
 /** Family display order + labels for the selector UI. */
 export const FAMILY_LABELS: Record<ModelFamily, { ko: string; en: string }> = {
-  auto: { ko: "자동 (앙상블)", en: "Auto (Ensemble)" },
-  groq: { ko: "Groq (무료)", en: "Groq (Free)" },
   anthropic: { ko: "Anthropic Claude", en: "Anthropic Claude" },
   openai: { ko: "OpenAI", en: "OpenAI" },
-  xai: { ko: "xAI Grok", en: "xAI Grok" },
   google: { ko: "Google Gemini", en: "Google Gemini" },
-  deepseek: { ko: "DeepSeek", en: "DeepSeek" },
-  meta: { ko: "Meta Llama", en: "Meta Llama" },
-  mistral: { ko: "Mistral", en: "Mistral" },
 };
 
 export const TIER_LABELS: Record<ModelTier, { ko: string; en: string }> = {

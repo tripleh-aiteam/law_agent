@@ -159,16 +159,11 @@
     "hideDetails": "Hide details",
     "emptyThread": "Pick a case from the sidebar or type a question below.",
     "noMatchesForTurn": "No similar precedents for this question.",
-    "moaBadge": "Mixture-of-Agents · {ok}/{total} models agreed",
-    "moaStageFanning": "3 models analyzing in parallel...",
-    "moaStageAggregating": "Synthesizing the best answer...",
-    "moaStageDone": "Done",
-    "moaSynthesizing": "Synthesizing",
-    "moaAggregator": "Aggregator",
-    "moaRunning": "{sec}s elapsed",
-    "moaDone": "Done",
-    "moaFailed": "Failed",
-    "moaSynthesized": "Final answer synthesized"
+    "thinkingN": "Running {count} models...",
+    "nModelsComparing": "comparing {count} models",
+    "markBest": "Mark as best",
+    "unmarkBest": "Unmark",
+    "bestAnswer": "★ Best answer"
   },
   "chips": {
     "summarize": {
@@ -198,6 +193,9 @@
     "toggleLocale": "Toggle language",
     "settings": "Settings",
     "modelSelector": "AI Model",
-    "modelSelectorHint": "Affects analysis quality. Premium models reason more precisely about Korean legal nuance."
+    "modelSelectorHint": "Affects analysis quality. Premium models reason more precisely about Korean legal nuance.",
+    "modelSelectorMultiHint": "Pick multiple models to run in parallel. Each answers independently — you compare the tabs and pick the best.",
+    "modelSelectorMultiLabel": "Comparing {count} models",
+    "modelSelectorSelected": "{count} selected"
   }
 }

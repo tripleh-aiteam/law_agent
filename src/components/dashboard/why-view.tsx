@@ -116,7 +116,10 @@ function WhyAccordionItem({
 }): React.ReactElement {
   const t = useTranslations("dashboard.why");
   const tResults = useTranslations("results");
-  const { selectedModelId } = useCases();
+  // Why-view is a single-model sub-tab; if the user has multi-selected,
+  // use the first picked model.
+  const { selectedModelIds } = useCases();
+  const selectedModelId = selectedModelIds[0];
 
   const [open, setOpen] = React.useState<boolean>(defaultOpen);
   const [state, setState] = React.useState<FetchState>(() => {

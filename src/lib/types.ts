@@ -104,56 +104,66 @@ export type TurnStatus = "pending" | "complete" | "cancelled" | "error";
  * conversation thread can render Q→A→Q→A independently per turn instead
  * of all questions sharing one global "latest result".
  */
+/**
+ * One per-model answer attached to a turn. When the user picks N models
+ * and hits Send, the turn gets N branches — one per model — and the UI
+ * renders them as tabs so the user can compare and pick the best.
+ */
+export interface TurnBranch {
+  /** Model that produced this branch (gateway-form id, e.g. "anthropic/claude-opus-4.7"). */
+  modelId: string;
+  status: TurnStatus;
+  /** Manus-style 1–2 paragraph summary in the user's locale. */
+  summary?: string;
+  elements?: LegalElements;
+  matches?: PrecedentMatch[];
+  /** Human-readable error message when status === "error". */
+  error?: string;
+  /** Local timestamp when this branch started (for the elapsed counter). */
+  startedAt?: number;
+  finishedAt?: number;
+}
+
 export interface CaseTurn {
   id: string;
   /** The question text exactly as the user typed it. */
   question: string;
   /** ISO timestamp when the user hit Send. */
   createdAt: string;
-  /** AI model used for this turn (for the receipt). */
-  modelId?: string;
   /** Filenames attached when the question was sent. */
   attachmentNames?: string[];
   /** Full narrative actually sent to /api/extract (question + file text). */
   narrative?: string;
+  /**
+   * Aggregate status across all branches:
+   *  - pending: at least one branch still running
+   *  - complete: all branches in a terminal state (and at least one complete)
+   *  - cancelled: user pressed Stop before any branch completed
+   *  - error: every branch errored
+   */
   status: TurnStatus;
-  /** Manus-style 1–2 paragraph summary of the input (user locale). */
+  /**
+   * One entry per model the user selected when this turn was sent. Always
+   * present on new turns (len >= 1). Old turns that predate the multi-model
+   * refactor won't have this — render code synthesizes a single branch
+   * from the legacy fields below.
+   */
+  branches?: TurnBranch[];
+  /** Model the user marked as the best answer for this turn, if any. */
+  bestBranchModelId?: string;
+
+  // ── Legacy single-model fields ──────────────────────────────────────
+  // Old turns wrote answers directly onto these fields. New code writes
+  // into `branches`. Kept here for back-compat with localStorage payloads
+  // from before the multi-model refactor.
+  /** @deprecated use branches[0].modelId */
+  modelId?: string;
+  /** @deprecated use branches[0].summary */
   summary?: string;
+  /** @deprecated use branches[0].elements */
   elements?: LegalElements;
+  /** @deprecated use branches[0].matches */
   matches?: PrecedentMatch[];
-  /** Human-readable error message when status === "error". */
+  /** @deprecated use branches[0].error */
   error?: string;
-  /**
-   * Audit trail from Mixture-of-Agents mode — one entry per fan-out model
-   * plus an optional aggregator entry. Undefined for single-model turns.
-   */
-  moaCandidates?: Array<{
-    modelId: string;
-    status: "ok" | "failed";
-    error?: string;
-  }>;
-  /**
-   * Live per-stage status for an in-flight MoA turn. Driven by the NDJSON
-   * stream from /api/extract. Lets the UI animate three parallel candidate
-   * cards and an aggregator card while the pipeline runs.
-   */
-  moaProgress?: {
-    /** Highest stage reached so far. */
-    stage: "fanning_out" | "aggregating" | "done";
-    candidates: Array<{
-      modelId: string;
-      status: "running" | "ok" | "failed";
-      /** Local timestamp when the candidate started (for the elapsed display). */
-      startedAt?: number;
-      finishedAt?: number;
-      error?: string;
-    }>;
-    aggregator?: {
-      modelId: string;
-      status: "running" | "ok" | "failed";
-      startedAt?: number;
-      finishedAt?: number;
-      error?: string;
-    };
-  };
 }

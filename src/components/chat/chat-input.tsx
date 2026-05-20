@@ -15,12 +15,12 @@ import {
 import { useCases } from "@/components/cases/cases-context";
 import { ActionChips } from "@/components/chat/action-chips";
 import { cn } from "@/lib/utils";
-import { MOA_ROSTER, isMoaModelId } from "@/lib/models";
 import type {
   CaseTurn,
   ClarifyingQuestion,
   LegalElements,
   PrecedentMatch,
+  TurnBranch,
 } from "@/lib/types";
 
 /** A file the user attached as context. Stays visible as a chip above the
@@ -44,42 +44,7 @@ interface ExtractResponse {
   elements: LegalElements;
   summary: string;
   clarifyingQuestions: ClarifyingQuestion[];
-  /** Present only when the request used Mixture-of-Agents (auto/...). */
-  candidates?: Array<{
-    modelId: string;
-    status: "ok" | "failed";
-    error?: string;
-  }>;
 }
-
-/**
- * Server-emitted lifecycle events for a Mixture-of-Agents streaming call.
- * Mirrors src/lib/moa.ts MoaProgressEvent — kept as a local type so the
- * client doesn't import server-only modules.
- */
-type MoaStreamEvent =
-  | { type: "candidate_start"; modelId: string; candidateIndex: number }
-  | {
-      type: "candidate_done";
-      modelId: string;
-      candidateIndex: number;
-      status: "ok" | "failed";
-      error?: string;
-    }
-  | { type: "aggregator_start"; modelId: string }
-  | { type: "aggregator_done"; status: "ok" | "failed"; error?: string }
-  | {
-      type: "final";
-      elements: LegalElements;
-      summary: string;
-      clarifyingQuestions: ClarifyingQuestion[];
-      candidates: Array<{
-        modelId: string;
-        status: "ok" | "failed";
-        error?: string;
-      }>;
-    }
-  | { type: "error"; message: string };
 
 interface SearchResponse {
   matches: PrecedentMatch[];
@@ -121,16 +86,24 @@ function uid() {
 }
 
 /* -------------------------------------------------------------------------- */
-/* Extract helpers (single-model vs MoA streaming)                             */
+/* Per-model extract + search pipeline                                         */
 /* -------------------------------------------------------------------------- */
 
-async function runSingleExtract(args: {
+/**
+ * Run the full extract→search pipeline for ONE model. Errors propagate so
+ * the caller can mark this branch as failed without affecting siblings.
+ */
+async function runOneBranch(args: {
   narrative: string;
   locale: string;
-  modelId?: string;
+  modelId: string;
   signal: AbortSignal;
-}): Promise<ExtractResponse> {
-  const res = await fetch("/api/extract", {
+}): Promise<{
+  elements: LegalElements;
+  summary: string;
+  matches: PrecedentMatch[];
+}> {
+  const exRes = await fetch("/api/extract", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -140,216 +113,48 @@ async function runSingleExtract(args: {
     }),
     signal: args.signal,
   });
-  if (!res.ok) {
-    const body = (await res.json().catch(() => null)) as
+  if (!exRes.ok) {
+    const body = (await exRes.json().catch(() => null)) as
       | { error?: string }
       | null;
-    throw new Error(body?.error ?? `Extract failed: ${res.status}`);
+    throw new Error(body?.error ?? `Extract failed: ${exRes.status}`);
   }
-  return (await res.json()) as ExtractResponse;
-}
+  const exData = (await exRes.json()) as ExtractResponse;
 
-/**
- * Drive the NDJSON stream from /api/extract when MoA is selected. Each line
- * is one `MoaStreamEvent`. We forward every non-final event to `onEvent`
- * (so the UI animates), and resolve with the final extraction payload when
- * the `final` event arrives. The `error` event rejects the promise.
- */
-async function runMoaStream(args: {
-  narrative: string;
-  locale: string;
-  signal: AbortSignal;
-  onEvent: (event: MoaStreamEvent) => void;
-}): Promise<ExtractResponse> {
-  const res = await fetch("/api/extract", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      narrative: args.narrative,
-      locale: args.locale,
-      // Send the MoA marker so the route streams instead of returning JSON.
-      model: "auto/mixture-of-agents",
-    }),
-    signal: args.signal,
-  });
-  if (!res.ok || !res.body) {
-    const body = (await res.json().catch(() => null)) as
-      | { error?: string }
-      | null;
-    throw new Error(body?.error ?? `Extract failed: ${res.status}`);
-  }
-
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  let finalPayload: ExtractResponse | null = null;
-
-  // Read until the stream ends or we see a "final"/"error" event.
-  while (true) {
-    const { value, done } = await reader.read();
-    if (value) buffer += decoder.decode(value, { stream: true });
-
-    // Split on newline. The last fragment (no trailing \n yet) stays in
-    // the buffer for the next iteration.
-    let nl = buffer.indexOf("\n");
-    while (nl !== -1) {
-      const line = buffer.slice(0, nl).trim();
-      buffer = buffer.slice(nl + 1);
-      if (line.length > 0) {
-        let event: MoaStreamEvent;
-        try {
-          event = JSON.parse(line) as MoaStreamEvent;
-        } catch {
-          // Malformed line — skip rather than abort the whole pipeline.
-          nl = buffer.indexOf("\n");
-          continue;
-        }
-        if (event.type === "final") {
-          finalPayload = {
-            elements: event.elements,
-            summary: event.summary,
-            clarifyingQuestions: event.clarifyingQuestions,
-            candidates: event.candidates,
-          };
-          // Still let the UI mark all stages as done.
-          args.onEvent(event);
-        } else if (event.type === "error") {
-          throw new Error(event.message);
-        } else {
-          args.onEvent(event);
-        }
-      }
-      nl = buffer.indexOf("\n");
+  // Search uses the model that just produced the extraction so the rerank
+  // stays consistent with the elements. If search fails we still keep the
+  // extraction (summary + elements) — that's the most valuable part.
+  let matches: PrecedentMatch[] = [];
+  try {
+    const srRes = await fetch("/api/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        narrative: args.narrative,
+        elements: exData.elements,
+        locale: args.locale,
+        model: args.modelId,
+      }),
+      signal: args.signal,
+    });
+    if (srRes.ok) {
+      const srData = (await srRes.json()) as SearchResponse;
+      matches = srData.matches ?? [];
     }
-
-    if (done) break;
+  } catch (err) {
+    // Swallow search-only errors — the extraction is the primary product.
+    // The abort case will re-throw via the outer promise's signal handling.
+    if (err instanceof DOMException && err.name === "AbortError") throw err;
   }
 
-  if (!finalPayload) {
-    throw new Error("MoA stream ended without a final result");
-  }
-  return finalPayload;
+  return {
+    elements: exData.elements,
+    summary: exData.summary,
+    matches,
+  };
 }
 
-/**
- * Apply a single MoaStreamEvent to the turn's `moaProgress`, using the
- * latest snapshot from React state via a functional update. We keep this
- * logic outside the component so it can be unit-tested independently if
- * we ever add coverage for it.
- */
-function applyMoaEvent(
-  caseId: string,
-  turnId: string,
-  event: MoaStreamEvent,
-  updateTurn: (
-    caseId: string,
-    turnId: string,
-    patch: Partial<CaseTurn>,
-  ) => void,
-) {
-  // We need the previous moaProgress to merge into. The updateTurn signature
-  // is patch-style, so we read the prior state via a closure trick — the
-  // chat-input call passes the LATEST state. To keep this simple, we use a
-  // builder over a fresh skeleton each call and let updateTurn's mirror
-  // logic do the rest. The caller seeds initial moaProgress on appendTurn,
-  // so subsequent events only need to PATCH the relevant slot.
-  if (event.type === "candidate_start") {
-    updateTurn(caseId, turnId, {
-      moaProgress: mergePatch((prev) => {
-        const candidates = [...(prev?.candidates ?? [])];
-        const i = candidates.findIndex((c) => c.modelId === event.modelId);
-        const next = {
-          modelId: event.modelId,
-          status: "running" as const,
-          startedAt: Date.now(),
-        };
-        if (i >= 0) candidates[i] = { ...candidates[i], ...next };
-        else candidates.push(next);
-        return {
-          stage: prev?.stage ?? "fanning_out",
-          candidates,
-          aggregator: prev?.aggregator,
-        };
-      }),
-    });
-  } else if (event.type === "candidate_done") {
-    updateTurn(caseId, turnId, {
-      moaProgress: mergePatch((prev) => {
-        const candidates = [...(prev?.candidates ?? [])];
-        const i = candidates.findIndex((c) => c.modelId === event.modelId);
-        const patch = {
-          status: event.status,
-          finishedAt: Date.now(),
-          error: event.error,
-        };
-        if (i >= 0)
-          candidates[i] = { ...candidates[i], ...patch };
-        return {
-          stage: prev?.stage ?? "fanning_out",
-          candidates,
-          aggregator: prev?.aggregator,
-        };
-      }),
-    });
-  } else if (event.type === "aggregator_start") {
-    updateTurn(caseId, turnId, {
-      moaProgress: mergePatch((prev) => ({
-        stage: "aggregating",
-        candidates: prev?.candidates ?? [],
-        aggregator: {
-          modelId: event.modelId,
-          status: "running",
-          startedAt: Date.now(),
-        },
-      })),
-    });
-  } else if (event.type === "aggregator_done") {
-    updateTurn(caseId, turnId, {
-      moaProgress: mergePatch((prev) => ({
-        stage: "done",
-        candidates: prev?.candidates ?? [],
-        aggregator: prev?.aggregator
-          ? {
-              ...prev.aggregator,
-              status: event.status,
-              finishedAt: Date.now(),
-              error: event.error,
-            }
-          : undefined,
-      })),
-    });
-  } else if (event.type === "final") {
-    updateTurn(caseId, turnId, {
-      moaProgress: mergePatch((prev) => ({
-        stage: "done",
-        candidates: prev?.candidates ?? [],
-        aggregator: prev?.aggregator,
-      })),
-    });
-  }
-}
-
-/**
- * Tiny marker type used so updateTurn can be called twice — the second call
- * carries a function that the cases-context applies against the LATEST
- * moaProgress. We piggyback on the existing `Partial<CaseTurn>` patch by
- * passing the function under the `moaProgress` key; the context unwraps it.
- *
- * (See cases-context.tsx `updateTurn` — it detects when a patch's
- * `moaProgress` field is a function and calls it with the prior value.)
- */
-type MoaProgressUpdater = (
-  prev: CaseTurn["moaProgress"],
-) => NonNullable<CaseTurn["moaProgress"]>;
-
-function mergePatch(
-  fn: MoaProgressUpdater,
-): NonNullable<CaseTurn["moaProgress"]> {
-  // The "function disguised as data" trick. cases-context.tsx checks
-  // `typeof patch.moaProgress === "function"` and calls it with the
-  // previous value to compute the new one.
-  return fn as unknown as NonNullable<CaseTurn["moaProgress"]>;
-}
+/* -------------------------------------------------------------------------- */
 
 export function ChatInput() {
   const tChat = useTranslations("chat");
@@ -360,9 +165,10 @@ export function ChatInput() {
     currentCaseId,
     createCase,
     selectCase,
-    selectedModelId,
+    selectedModelIds,
     appendTurn,
     updateTurn,
+    updateTurnBranch,
   } = useCases();
 
   const [value, setValue] = React.useState("");
@@ -380,13 +186,11 @@ export function ChatInput() {
     null,
   );
 
-  /** AbortController for the in-flight extract+search pipeline. Stored in a
-   * ref (not state) because clicking Stop must fire the abort synchronously
-   * — React state updates would queue the abort behind a re-render. */
+  /** Single AbortController governs ALL parallel branches for the current
+   * turn. Click Stop → abort → every per-model fetch rejects with AbortError
+   * → each branch marks itself cancelled. */
   const abortRef = React.useRef<AbortController | null>(null);
 
-  // Detect Web Speech API after mount only — checking `window` during SSR/hydration
-  // would render different markup on server vs client and break hydration.
   const [speechSupported, setSpeechSupported] = React.useState(false);
   React.useEffect(() => {
     const ctor = getSpeechRecognitionCtor();
@@ -403,7 +207,6 @@ export function ChatInput() {
     setIsSending(false);
   }, [currentCaseId]);
 
-  // Autoresize the textarea up to ~6 lines, then scroll.
   React.useEffect(() => {
     const el = textareaRef.current;
     if (!el) return;
@@ -428,9 +231,6 @@ export function ChatInput() {
       if (list.length === 0) return;
       for (const file of list) {
         const id = uid();
-        // Optimistically push a "loading" attachment chip — never inject
-        // the extracted text into the textarea (that's Manus-style:
-        // the file is CONTEXT, the textarea is the QUESTION).
         setAttachments((prev) => [
           ...prev,
           {
@@ -503,19 +303,9 @@ export function ChatInput() {
     setAttachments((prev) => prev.filter((a) => a.id !== id));
   }, []);
 
-  /** Build the narrative sent to /api/extract by combining:
-   *   1. context from the most recent completed turn (so short follow-ups
-   *      like "why?" have meaning),
-   *   2. the user's current question (the textarea text),
-   *   3. any newly attached files.
-   *  Order matters: prior context first, then the live question, then files.
-   *  The LLM treats the current question as the primary signal and uses
-   *  prior context to interpret it.
-   *
-   *  Token budget: we include the prior turn's SUMMARY (small) plus its
-   *  narrative (could be large — a multi-MB PDF). The extractor's
-   *  `trimMiddle` cap downstream prevents runaway token cost.
-   */
+  /** Build the narrative sent to /api/extract by combining the user's
+   *  question (the textarea text), files, AND context from the most
+   *  recent completed turn so follow-ups have continuity. */
   const buildNarrative = React.useCallback(
     (question: string, currentAttachments: Attachment[]): string => {
       const q = question.trim();
@@ -526,7 +316,6 @@ export function ChatInput() {
         .map((a) => `[첨부파일 / Attached file: ${a.filename}]\n${a.text}`)
         .join("\n\n---\n\n");
 
-      // Find the most recent completed turn to use as conversation context.
       const priorTurns = currentCase?.turns ?? [];
       const lastCompleted = [...priorTurns]
         .reverse()
@@ -535,8 +324,18 @@ export function ChatInput() {
       const sections: string[] = [];
 
       if (lastCompleted) {
-        // Multi-turn follow-up — give the LLM the prior context so a short
-        // question like "why?" or "more detail" has something to refer to.
+        // Find the best branch (user-marked) or the first complete branch
+        // to use as prior context for the follow-up.
+        const priorBranches = lastCompleted.branches ?? [];
+        const bestId = lastCompleted.bestBranchModelId;
+        const priorBranch =
+          (bestId && priorBranches.find((b) => b.modelId === bestId)) ||
+          priorBranches.find((b) => b.status === "complete") ||
+          // legacy turn fallback (no branches)
+          ({
+            summary: lastCompleted.summary,
+          } as Partial<TurnBranch>);
+
         const contextBlock: string[] = [
           "[이전 대화 / Prior conversation]",
         ];
@@ -550,9 +349,9 @@ export function ChatInput() {
             `이전 질문 / Previous question: ${lastCompleted.question}`,
           );
         }
-        if (lastCompleted.summary) {
+        if (priorBranch?.summary) {
           contextBlock.push(
-            `이전 분석 요약 / Previous analysis summary:\n${lastCompleted.summary}`,
+            `이전 분석 요약 / Previous analysis summary:\n${priorBranch.summary}`,
           );
         }
         sections.push(contextBlock.join("\n\n"));
@@ -578,7 +377,6 @@ export function ChatInput() {
 
   const onFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) handleFiles(e.target.files);
-    // Reset so picking the same file again still fires.
     e.target.value = "";
   };
 
@@ -632,12 +430,8 @@ export function ChatInput() {
         baseTranscriptRef.current += finalText;
         setValue(baseTranscriptRef.current + interimText);
       };
-      rec.onerror = () => {
-        setIsRecording(false);
-      };
-      rec.onend = () => {
-        setIsRecording(false);
-      };
+      rec.onerror = () => setIsRecording(false);
+      rec.onend = () => setIsRecording(false);
       recognitionRef.current = rec;
       rec.start();
       setIsRecording(true);
@@ -666,22 +460,16 @@ export function ChatInput() {
 
   // ---------- Send pipeline ----------
   const hasReadyAttachments = attachments.some((a) => a.status === "ready");
-  // Does this case already have at least one completed turn? If so, the
-  // user is sending a FOLLOW-UP — buildNarrative will splice prior context
-  // in, so the new question can be as short as "why?" or "more". For a
-  // brand-new case with no prior turns, we still want some context (10
-  // chars min) so the extractor has something to reason about.
   const hasPriorTurns = (currentCase?.turns ?? []).some(
     (t) => t.status === "complete",
   );
   const minChars = hasPriorTurns ? 1 : 10;
   const canSend =
     !isSending &&
+    selectedModelIds.length > 0 &&
     (value.trim().length >= minChars || hasReadyAttachments);
 
   const onStop = () => {
-    // Synchronously abort the in-flight fetches. The catch block in onSend
-    // will mark the turn as "cancelled".
     abortRef.current?.abort();
   };
 
@@ -690,26 +478,28 @@ export function ChatInput() {
     const snapshotAttachments = attachments;
     const narrative = buildNarrative(value, snapshotAttachments);
     if (!narrative) return;
+    if (selectedModelIds.length === 0) return;
 
-    // Make sure we have an active case to write into.
     let targetId = currentCaseId;
     if (!targetId) {
-      // No name passed → createCase uses translatable nameKey "sidebar.untitledCase".
       targetId = createCase(null);
       selectCase(targetId);
     }
 
-    // Snapshot of attached filenames at ask-time so the turn shows them even
-    // after we clear the attachments after send.
     const attachmentNames = snapshotAttachments
       .filter((a) => a.status === "ready")
       .map((a) => a.filename);
 
-    // Create the turn with status="pending" so the thread immediately shows
-    // Q + a loading bubble. The Stop button uses this turn's id to know
-    // which one to mark cancelled.
+    // Build a turn with ONE branch per selected model, all starting as
+    // pending. The UI will render N tabs immediately so the user sees
+    // every model spin up at once.
     const turnId = uid();
-    const usingMoa = isMoaModelId(selectedModelId);
+    const startedAt = Date.now();
+    const branches: TurnBranch[] = selectedModelIds.map((modelId) => ({
+      modelId,
+      status: "pending",
+      startedAt,
+    }));
     const pendingTurn: CaseTurn = {
       id: turnId,
       question:
@@ -718,29 +508,13 @@ export function ChatInput() {
           ? attachmentNames.join(", ")
           : ""),
       createdAt: new Date().toISOString(),
-      modelId: selectedModelId ?? undefined,
       attachmentNames: attachmentNames.length > 0 ? attachmentNames : undefined,
       narrative,
       status: "pending",
-      // Seed the MoA visualization immediately so the user sees all 3
-      // candidate cards appear the moment they hit Send — no awkward gap
-      // while we wait for the first server event to arrive.
-      moaProgress: usingMoa
-        ? {
-            stage: "fanning_out",
-            candidates: MOA_ROSTER.map((modelId) => ({
-              modelId,
-              status: "running" as const,
-              startedAt: Date.now(),
-            })),
-          }
-        : undefined,
+      branches,
     };
     appendTurn(targetId, pendingTurn);
 
-    // Clear textarea + attachments immediately. The Q is now part of the
-    // thread; the input is ready for the next question even while this one
-    // is still running (Manus-style).
     setValue("");
     setAttachments([]);
     setError(null);
@@ -749,72 +523,45 @@ export function ChatInput() {
     abortRef.current = ac;
     setIsSending(true);
 
+    // Fan out — Promise.allSettled so one model's failure doesn't kill
+    // the others. Each branch's status updates as soon as ITS call
+    // finishes, so a fast model shows results while a slow one is still
+    // spinning.
     try {
-      const exData: ExtractResponse = usingMoa
-        ? await runMoaStream({
-            narrative,
-            locale,
-            signal: ac.signal,
-            onEvent: (event) =>
-              applyMoaEvent(targetId, turnId, event, updateTurn),
-          })
-        : await runSingleExtract({
-            narrative,
-            locale,
-            modelId: selectedModelId ?? undefined,
-            signal: ac.signal,
-          });
-
-      // Persist summary + elements + (optional) MoA audit onto the turn
-      // right away — even if search fails afterwards, the user still sees
-      // the document summary (which is the main thing they want for
-      // "summarize this PDF" requests).
-      updateTurn(targetId, turnId, {
-        elements: exData.elements,
-        summary: exData.summary,
-        moaCandidates: exData.candidates,
-      });
-
-      const srRes = await fetch("/api/search", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          narrative,
-          elements: exData.elements,
-          locale,
-          model: selectedModelId ?? undefined,
+      await Promise.allSettled(
+        selectedModelIds.map(async (modelId) => {
+          try {
+            const result = await runOneBranch({
+              narrative,
+              locale,
+              modelId,
+              signal: ac.signal,
+            });
+            updateTurnBranch(targetId!, turnId, modelId, {
+              status: "complete",
+              elements: result.elements,
+              summary: result.summary,
+              matches: result.matches,
+              finishedAt: Date.now(),
+            });
+          } catch (err) {
+            if (err instanceof DOMException && err.name === "AbortError") {
+              updateTurnBranch(targetId!, turnId, modelId, {
+                status: "cancelled",
+                finishedAt: Date.now(),
+              });
+            } else {
+              const message =
+                err instanceof Error ? err.message : String(err);
+              updateTurnBranch(targetId!, turnId, modelId, {
+                status: "error",
+                error: message,
+                finishedAt: Date.now(),
+              });
+            }
+          }
         }),
-        signal: ac.signal,
-      });
-      if (!srRes.ok) {
-        // Search failed but we still have a summary — keep the turn
-        // "complete" with whatever we have rather than marking the whole
-        // turn as errored.
-        updateTurn(targetId, turnId, {
-          status: "complete",
-          matches: [],
-        });
-      } else {
-        const srData = (await srRes.json()) as SearchResponse;
-        updateTurn(targetId, turnId, {
-          status: "complete",
-          matches: srData.matches ?? [],
-        });
-      }
-    } catch (err: unknown) {
-      // AbortError → Stop button was pressed.
-      if (
-        err instanceof DOMException && err.name === "AbortError"
-      ) {
-        updateTurn(targetId, turnId, { status: "cancelled" });
-      } else {
-        const message = err instanceof Error ? err.message : String(err);
-        updateTurn(targetId, turnId, {
-          status: "error",
-          error: message,
-        });
-        setError(message);
-      }
+      );
     } finally {
       if (abortRef.current === ac) abortRef.current = null;
       setIsSending(false);
@@ -850,8 +597,6 @@ export function ChatInput() {
           </div>
         )}
 
-        {/* Attachment chip area — shows above the textarea so users see
-            their files as CONTEXT, separate from their question. */}
         {attachments.length > 0 && (
           <div className="flex flex-wrap gap-2 border-b border-slate-100 px-4 pt-3 pb-3">
             {attachments.map((a) => (
@@ -859,12 +604,9 @@ export function ChatInput() {
                 key={a.id}
                 className={cn(
                   "group flex items-center gap-2.5 rounded-lg border px-3 py-2 text-sm transition-colors",
-                  a.status === "loading" &&
-                    "border-slate-200 bg-slate-50",
-                  a.status === "ready" &&
-                    "border-emerald-200 bg-emerald-50",
-                  a.status === "error" &&
-                    "border-rose-200 bg-rose-50",
+                  a.status === "loading" && "border-slate-200 bg-slate-50",
+                  a.status === "ready" && "border-emerald-200 bg-emerald-50",
+                  a.status === "error" && "border-rose-200 bg-rose-50",
                 )}
                 title={a.errorMessage ?? a.warnings.join("\n") ?? a.filename}
               >
@@ -957,9 +699,6 @@ export function ChatInput() {
                 title={
                   isRecording ? tChat("stopRecording") : tChat("startRecording")
                 }
-                aria-label={
-                  isRecording ? tChat("stopRecording") : tChat("startRecording")
-                }
                 aria-pressed={isRecording}
               >
                 {isRecording ? (
@@ -974,7 +713,7 @@ export function ChatInput() {
             {isSending && (
               <span className="inline-flex items-center gap-1.5 text-xs text-slate-500">
                 <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
-                {tChat("thinking")}
+                {tChat("thinkingN", { count: selectedModelIds.length })}
               </span>
             )}
             {isSending ? (
@@ -1002,6 +741,11 @@ export function ChatInput() {
               >
                 <ArrowUp className="h-3.5 w-3.5" aria-hidden />
                 {tChat("send")}
+                {selectedModelIds.length > 1 && (
+                  <span className="ml-0.5 rounded-full bg-white/20 px-1.5 text-[10px] font-bold">
+                    ×{selectedModelIds.length}
+                  </span>
+                )}
               </button>
             )}
           </div>
