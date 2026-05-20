@@ -55,23 +55,30 @@ export interface ModelOption {
 export const MOA_MODEL_ID = "auto/mixture-of-agents";
 
 /**
- * The candidate roster for Mixture-of-Agents. Currently configured for
- * FREE MODE — every entry runs on a free-tier provider so MoA queries
- * cost $0 until the user tops up their Vercel AI Gateway credit.
+ * The candidate roster for Mixture-of-Agents. FREE MODE — every entry runs
+ * on Groq's free tier with verified strict-json_schema support, so MoA
+ * queries cost $0 even with the Vercel AI Gateway empty.
  *
- *   1. Groq Llama 3.3 70B   — Meta Llama, Groq's free tier. Very fast.
- *   2. Groq Llama 4 Scout   — Newer Meta variant, multimodal. Free.
- *   3. Google Gemini 2.5 Flash — Direct Google AI Studio (1,500 RPD free).
- *   4. Groq Qwen 3 32B      — Alibaba Qwen, different family. Free.
+ *   1. OpenAI GPT-OSS 120B  — OpenAI's open-weight flagship via Groq.
+ *                              Strongest free reasoning, reliable JSON.
+ *   2. OpenAI GPT-OSS 20B   — Smaller OpenAI open-weight variant.
+ *                              Different tier from 120B catches different
+ *                              issues even in the same family.
+ *   3. Meta Llama 4 Scout   — Meta's multimodal Llama 4. Verified
+ *                              json_schema support (proven in production).
+ *   4. Moonshot Kimi K2     — Different family entirely. Strong CJK
+ *                              (Korean / Chinese / Japanese), 1M context.
  *
- * All run via DIRECT provider keys, NOT the Vercel AI Gateway, so they
- * don't draw from the (currently empty) gateway credit balance.
+ * All run via DIRECT Groq API (GROQ_API_KEY), NOT the Vercel AI Gateway,
+ * so they don't touch the empty gateway credit balance. Older Groq
+ * models that only support loose `json_object` were excluded — those
+ * fail our strict legal-elements schema.
  */
 export const MOA_ROSTER: readonly string[] = [
-  "groq/llama-3.3-70b-versatile",
+  "groq/openai/gpt-oss-120b",
+  "groq/openai/gpt-oss-20b",
   "groq/meta-llama/llama-4-scout-17b-16e-instruct",
-  "google/gemini-2.5-flash",
-  "groq/qwen/qwen3-32b",
+  "groq/moonshotai/kimi-k2-instruct",
 ];
 
 /**
@@ -104,19 +111,31 @@ export const MODEL_OPTIONS: ModelOption[] = [
     family: "auto",
     tier: "premium",
     description:
-      "HYBRID: 4 FREE candidates (Llama 3.3 70B + Llama 4 Scout + Gemini 2.5 Flash + Qwen 3) fan out in parallel, then Claude Sonnet 4.6 synthesizes via your direct Anthropic key (~$0.03/query, ~666 queries from $20). Best Korean legal quality at near-free cost.",
+      "HYBRID: 4 FREE candidates (GPT-OSS 120B + GPT-OSS 20B + Llama 4 Scout + Kimi K2) fan out via Groq direct, then Claude Sonnet 4.6 synthesizes via your direct Anthropic key (~$0.03/query, ~666 queries from $20). Best Korean legal quality at near-free cost.",
     korean: 5,
   },
   // ─── Groq (FREE TIER — direct API, bypasses paid gateway) ──────────
-  // Groq's free tier serves these open-weight models at very high speed
-  // (~500 tok/s). Rate limits are generous enough for normal use.
+  // ONLY models that support strict `response_format: json_schema` are
+  // listed. Older Groq models (llama-3.3-70b, llama-3.1-8b, qwen-3-32b)
+  // only support loose `json_object` mode which fails our LegalElements
+  // schema validation, so they were dropped from this registry.
+  // Groq's free tier serves these at very high speed (~500 tok/s).
   {
-    id: "groq/llama-3.3-70b-versatile",
-    displayName: "Llama 3.3 70B",
+    id: "groq/openai/gpt-oss-120b",
+    displayName: "GPT-OSS 120B (OpenAI)",
     family: "groq",
     tier: "balanced",
     description:
-      "FREE via Groq direct API. Meta's strong general model — ~500 tok/s. Decent Korean, no gateway cost.",
+      "FREE via Groq. OpenAI's open-weight 120B model. Strong reasoning + reliable strict JSON. Best free OpenAI option.",
+    korean: 3,
+  },
+  {
+    id: "groq/openai/gpt-oss-20b",
+    displayName: "GPT-OSS 20B (OpenAI)",
+    family: "groq",
+    tier: "fast",
+    description:
+      "FREE via Groq. Smaller OpenAI open-weight model — fast, supports strict JSON. Good for high-volume.",
     korean: 3,
   },
   {
@@ -125,43 +144,26 @@ export const MODEL_OPTIONS: ModelOption[] = [
     family: "groq",
     tier: "fast",
     description:
-      "FREE via Groq. Newer Meta Llama 4 Scout, multimodal-capable. Fast.",
+      "FREE via Groq. Meta Llama 4 Scout, supports strict json_schema. Fast multilingual.",
     korean: 3,
   },
   {
-    id: "groq/llama-3.1-8b-instant",
-    displayName: "Llama 3.1 8B Instant",
-    family: "groq",
-    tier: "fast",
-    description:
-      "FREE via Groq. Tiny + extremely fast (~800 tok/s). Good for short queries.",
-    korean: 3,
-  },
-  {
-    id: "groq/qwen/qwen3-32b",
-    displayName: "Qwen 3 32B",
+    id: "groq/meta-llama/llama-4-maverick-17b-128e-instruct",
+    displayName: "Llama 4 Maverick",
     family: "groq",
     tier: "balanced",
     description:
-      "FREE via Groq. Alibaba Qwen — strong CJK (Korean / Chinese / Japanese) for an open model.",
+      "FREE via Groq. Meta Llama 4 Maverick — larger 128-expert variant. Strict JSON. Better reasoning than Scout.",
+    korean: 3,
+  },
+  {
+    id: "groq/moonshotai/kimi-k2-instruct",
+    displayName: "Kimi K2 (Moonshot)",
+    family: "groq",
+    tier: "premium",
+    description:
+      "FREE via Groq. Moonshot's flagship — strong CJK languages, 1M context, supports strict json_schema.",
     korean: 4,
-  },
-  {
-    id: "groq/openai/gpt-oss-120b",
-    displayName: "GPT-OSS 120B",
-    family: "groq",
-    tier: "balanced",
-    description:
-      "FREE via Groq. OpenAI's open-weight 120B model. Strong reasoning, useful as a free aggregator.",
-    korean: 3,
-  },
-  {
-    id: "groq/openai/gpt-oss-20b",
-    displayName: "GPT-OSS 20B",
-    family: "groq",
-    tier: "fast",
-    description: "FREE via Groq. Smaller open-weight OpenAI model.",
-    korean: 3,
   },
 
   // ─── Anthropic Claude ───────────────────────────────────────────────
@@ -480,14 +482,16 @@ export const MODEL_OPTIONS: ModelOption[] = [
 /**
  * Default model — used when the user hasn't selected one yet.
  *
- * FREE MODE: Gemini 2.5 Flash via direct Google AI Studio API. The user's
- * Vercel AI Gateway credit is empty; this default avoids the gateway
- * entirely while still giving solid Korean legal handling at $0.
+ * FREE MODE: GPT-OSS 120B via Groq direct API. Best free model with
+ * verified strict-json_schema support. Avoids the empty Vercel AI Gateway
+ * AND avoids the Gemini direct path (which requires
+ * GOOGLE_GENERATIVE_AI_API_KEY on Vercel — not just .env.local).
  *
- * When the user tops up gateway credit, switch this back to
- * "anthropic/claude-sonnet-4.6" for the previous default.
+ * When the user tops up gateway credit OR sets GOOGLE_GENERATIVE_AI_API_KEY
+ * on Vercel, this can switch back to "anthropic/claude-sonnet-4.6" or
+ * "google/gemini-2.5-flash".
  */
-export const DEFAULT_MODEL_ID = "google/gemini-2.5-flash";
+export const DEFAULT_MODEL_ID = "groq/openai/gpt-oss-120b";
 
 const MODEL_BY_ID = new Map(MODEL_OPTIONS.map((m) => [m.id, m]));
 
@@ -508,7 +512,12 @@ const LEGACY_ID_ALIASES: Record<string, string> = {
   "deepseek/deepseek-v3": "deepseek/deepseek-v3",
   "deepseek/deepseek-r1": "deepseek/deepseek-r1",
   "mistral/mistral-large": "mistral/mistral-large-3",
-  "moonshot/kimi-k2": "anthropic/claude-sonnet-4.6", // dropped from registry
+  "moonshot/kimi-k2": "groq/moonshotai/kimi-k2-instruct",
+  // Removed Groq models that lack strict json_schema support — auto-migrate
+  // selections to working alternatives so the user doesn't get a broken UI.
+  "groq/llama-3.3-70b-versatile": "groq/meta-llama/llama-4-scout-17b-16e-instruct",
+  "groq/llama-3.1-8b-instant": "groq/openai/gpt-oss-20b",
+  "groq/qwen/qwen3-32b": "groq/moonshotai/kimi-k2-instruct",
 };
 
 function canonicalizeId(id: string | null | undefined): string | null {
