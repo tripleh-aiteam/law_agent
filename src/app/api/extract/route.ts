@@ -109,12 +109,42 @@ export async function POST(req: Request): Promise<Response> {
     });
     const rawMessage =
       err instanceof Error ? err.message : "Extraction failed";
-    const message = rawMessage.includes("did not match schema")
-      ? "분석할 수 없는 형식입니다. 학술 자료가 아닌, 실제 사건의 사실관계(당사자, 청구원인, 일시 등)를 포함하여 입력해 주세요. / The input doesn't look like a case — please include real party facts, claims, and dates."
-      : rawMessage.includes("could not parse")
-        ? "모델이 유효한 JSON을 반환하지 못했습니다. 다른 모델로 다시 시도해 주세요. / Model returned unparseable output — try a different model."
-        : rawMessage;
+    const lower = rawMessage.toLowerCase();
+    const family = parsed.data.model
+      ? resolveModel(parsed.data.model).family
+      : undefined;
+    const envVar = directKeyEnvVar(family);
+    const message =
+      lower.includes("insufficient funds") || lower.includes("insufficient_funds")
+        ? envVar
+          ? `${parsed.data.model} routed through the Vercel AI Gateway, which is out of credit. Fix: either (1) add ${envVar} to your Vercel project environment variables to route this model directly, OR (2) top up the AI Gateway at vercel.com → AI Gateway → Top up.`
+          : `${parsed.data.model} routed through the Vercel AI Gateway, which is out of credit. Top up the gateway, or pick a different model.`
+        : rawMessage.includes("did not match schema")
+          ? "분석할 수 없는 형식입니다. 학술 자료가 아닌, 실제 사건의 사실관계(당사자, 청구원인, 일시 등)를 포함하여 입력해 주세요. / The input doesn't look like a case — please include real party facts, claims, and dates."
+          : rawMessage.includes("could not parse")
+            ? "모델이 유효한 JSON을 반환하지 못했습니다. 다른 모델로 다시 시도해 주세요. / Model returned unparseable output — try a different model."
+            : rawMessage;
     return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
+
+/**
+ * Map a model family to the env var name that would route it direct
+ * (bypassing the gateway). Used in error messages so the user knows
+ * exactly which Vercel env var to set when the gateway is empty.
+ */
+function directKeyEnvVar(family: string | undefined): string | undefined {
+  switch (family) {
+    case "anthropic":
+      return "ANTHROPIC_API_KEY";
+    case "openai":
+      return "OPENAI_API_KEY";
+    case "google":
+      return "GOOGLE_GENERATIVE_AI_API_KEY";
+    case "manus":
+      return "MANUS_API_KEY";
+    default:
+      return undefined;
   }
 }
 
