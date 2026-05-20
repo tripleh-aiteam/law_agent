@@ -1,17 +1,20 @@
 /**
  * Resolves a user-selected model ID into either:
- *   1. A direct-provider model instance (e.g. `anthropic("claude-opus-4-7")`)
- *      when the corresponding provider API key is set in the environment, OR
- *   2. The plain gateway-form string ("anthropic/claude-opus-4-7") that
- *      AI SDK v6 routes through Vercel AI Gateway when AI_GATEWAY_API_KEY
- *      is set.
+ *   1. A gateway-form string ("anthropic/claude-opus-4-7") routed via the
+ *      Vercel AI Gateway when AI_GATEWAY_API_KEY is set (preferred), OR
+ *   2. A direct-provider model instance (e.g. `anthropic("claude-opus-4-7")`)
+ *      when the gateway key is absent but a direct provider key is set.
  *
- * Direct providers are preferred when their keys are available because:
- *   - More predictable rate limits than the gateway pool
- *   - User-owned billing (some users prefer per-provider invoices)
- *   - Lower latency (one less hop)
+ * Why gateway-first:
+ *   - More forgiving structured-output normalization. Direct Anthropic with
+ *     complex zod schemas sometimes returns valid JSON that fails zod
+ *     validation; the gateway's compatibility layer smooths this over.
+ *   - Single billing surface (Vercel Pro credits) instead of per-provider.
+ *   - One code path to debug instead of N.
  *
- * Gateway is the fallback so the agent keeps working even without direct keys.
+ * Direct providers are kept as a fallback so the agent still works on
+ * deployments without AI_GATEWAY_API_KEY (e.g. local development on a
+ * laptop without Vercel credentials).
  */
 import { anthropic } from "@ai-sdk/anthropic";
 import { openai } from "@ai-sdk/openai";
@@ -48,7 +51,12 @@ export function resolveModelForUse(
   }
   const modelName = modelNameFromId(opt.id);
 
-  // Prefer direct provider when its key is configured.
+  // Prefer gateway routing — more reliable JSON-schema normalization.
+  if (hasEnv("AI_GATEWAY_API_KEY")) {
+    return opt.id;
+  }
+
+  // No gateway → fall back to direct provider when its key is configured.
   if (opt.family === "anthropic" && hasEnv("ANTHROPIC_API_KEY")) {
     return anthropic(modelName);
   }
@@ -59,6 +67,7 @@ export function resolveModelForUse(
     return google(modelName);
   }
 
-  // Fall back to gateway routing via AI_GATEWAY_API_KEY.
+  // No keys configured at all — return the gateway string as a last resort
+  // (will fail with a clear "no API key" error downstream).
   return opt.id;
 }
