@@ -65,15 +65,9 @@ export const MODEL_OPTIONS: ModelOption[] = [
     korean: 4,
   },
   // ─── Google Gemini ─────────────────────────────────────────────────
-  {
-    id: "google/gemini-2.5-pro",
-    displayName: "Gemini 2.5 Pro",
-    family: "google",
-    tier: "premium",
-    description:
-      "Google's flagship. Strong multilingual model; particularly good at long-context analysis.",
-    korean: 4,
-  },
+  // Note: gemini-2.5-pro is currently removed from the selector — its
+  // structured-output (JSON schema) mode is unreliable with AI SDK v6,
+  // returning "could not parse" errors. Use Flash for Gemini calls.
   {
     id: "google/gemini-2.5-flash",
     displayName: "Gemini 2.5 Flash",
