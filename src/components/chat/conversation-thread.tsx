@@ -155,6 +155,11 @@ function AnswerBody({ turn }: { turn: CaseTurn }): React.ReactElement {
   const t = useTranslations("chat");
 
   if (turn.status === "pending") {
+    // MoA pending turns get a live agent-progress visualization. Everything
+    // else gets the generic "Thinking..." loader.
+    if (turn.moaProgress) {
+      return <MoaProgressView progress={turn.moaProgress} />;
+    }
     return (
       <div className="rounded-2xl rounded-tl-md border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600 shadow-sm">
         <div className="flex items-center gap-2">
@@ -282,6 +287,179 @@ function AnswerComplete({ turn }: { turn: CaseTurn }): React.ReactElement {
       )}
     </div>
   );
+}
+
+/* -------------------------------------------------------------------------- */
+/* MoA live progress (shown while an MoA turn is pending)                      */
+/* -------------------------------------------------------------------------- */
+
+function MoaProgressView({
+  progress,
+}: {
+  progress: NonNullable<CaseTurn["moaProgress"]>;
+}): React.ReactElement {
+  const t = useTranslations("chat");
+  const { stage, candidates, aggregator } = progress;
+
+  return (
+    <div className="space-y-3 rounded-2xl rounded-tl-md border border-indigo-200 bg-gradient-to-br from-indigo-50/60 via-white to-violet-50/40 px-4 py-3.5 shadow-sm">
+      <div className="flex items-center gap-2 text-[12px] font-semibold text-indigo-700">
+        <Sparkles className="h-3.5 w-3.5" aria-hidden />
+        <span>
+          {stage === "fanning_out"
+            ? t("moaStageFanning")
+            : stage === "aggregating"
+              ? t("moaStageAggregating")
+              : t("moaStageDone")}
+        </span>
+      </div>
+
+      {/* 3 candidate cards, side by side at sm+. Each animates by status. */}
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+        {candidates.map((c) => (
+          <CandidateCard key={c.modelId} candidate={c} />
+        ))}
+      </div>
+
+      {/* Arrow + aggregator card. Aggregator only appears when stage advances. */}
+      {(aggregator || stage !== "fanning_out") && (
+        <div className="flex items-center gap-2 pt-1">
+          <div className="h-px flex-1 bg-indigo-200" />
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-indigo-500">
+            {t("moaSynthesizing")}
+          </span>
+          <div className="h-px flex-1 bg-indigo-200" />
+        </div>
+      )}
+      {aggregator && <AggregatorCard aggregator={aggregator} />}
+    </div>
+  );
+}
+
+function CandidateCard({
+  candidate,
+}: {
+  candidate: NonNullable<CaseTurn["moaProgress"]>["candidates"][number];
+}): React.ReactElement {
+  const t = useTranslations("chat");
+  const elapsed = useElapsed(
+    candidate.status === "running" ? candidate.startedAt : undefined,
+  );
+  const isRunning = candidate.status === "running";
+  const isOk = candidate.status === "ok";
+  const isFailed = candidate.status === "failed";
+
+  return (
+    <div
+      className={cn(
+        "relative overflow-hidden rounded-lg border bg-white px-3 py-2 text-[12px] transition-colors",
+        isRunning && "border-indigo-300 shadow-sm",
+        isOk && "border-emerald-300 bg-emerald-50/60",
+        isFailed && "border-rose-300 bg-rose-50/60",
+      )}
+    >
+      <div className="flex items-center gap-2">
+        {isRunning ? (
+          <Loader2
+            className="h-3.5 w-3.5 shrink-0 animate-spin text-indigo-500"
+            aria-hidden
+          />
+        ) : isOk ? (
+          <CheckCircle2
+            className="h-3.5 w-3.5 shrink-0 text-emerald-600"
+            aria-hidden
+          />
+        ) : (
+          <XCircle className="h-3.5 w-3.5 shrink-0 text-rose-600" aria-hidden />
+        )}
+        <div className="min-w-0 flex-1">
+          <div className="truncate font-medium text-slate-900">
+            {shortModelLabel(candidate.modelId)}
+          </div>
+          <div className="truncate text-[10px] text-slate-500">
+            {isRunning
+              ? t("moaRunning", { sec: elapsed })
+              : isOk
+                ? t("moaDone")
+                : t("moaFailed")}
+          </div>
+        </div>
+      </div>
+      {/* Subtle progress bar while running. */}
+      {isRunning && (
+        <div className="absolute inset-x-0 bottom-0 h-0.5 animate-pulse bg-indigo-400/60" />
+      )}
+    </div>
+  );
+}
+
+function AggregatorCard({
+  aggregator,
+}: {
+  aggregator: NonNullable<NonNullable<CaseTurn["moaProgress"]>["aggregator"]>;
+}): React.ReactElement {
+  const t = useTranslations("chat");
+  const elapsed = useElapsed(
+    aggregator.status === "running" ? aggregator.startedAt : undefined,
+  );
+  const isRunning = aggregator.status === "running";
+  const isOk = aggregator.status === "ok";
+  return (
+    <div
+      className={cn(
+        "rounded-lg border bg-gradient-to-r px-3 py-2 text-[12px] transition-colors",
+        isRunning
+          ? "border-violet-300 from-violet-50 to-indigo-50 shadow-sm"
+          : isOk
+            ? "border-emerald-300 from-emerald-50 to-emerald-50/40"
+            : "border-rose-300 from-rose-50 to-rose-50/40",
+      )}
+    >
+      <div className="flex items-center gap-2">
+        {isRunning ? (
+          <Loader2
+            className="h-3.5 w-3.5 shrink-0 animate-spin text-violet-500"
+            aria-hidden
+          />
+        ) : isOk ? (
+          <CheckCircle2
+            className="h-3.5 w-3.5 shrink-0 text-emerald-600"
+            aria-hidden
+          />
+        ) : (
+          <XCircle className="h-3.5 w-3.5 shrink-0 text-rose-600" aria-hidden />
+        )}
+        <div className="min-w-0 flex-1">
+          <div className="truncate font-medium text-slate-900">
+            {t("moaAggregator")} · {shortModelLabel(aggregator.modelId)}
+          </div>
+          <div className="truncate text-[10px] text-slate-500">
+            {isRunning
+              ? t("moaRunning", { sec: elapsed })
+              : isOk
+                ? t("moaSynthesized")
+                : aggregator.error ?? t("moaFailed")}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Updates every 250ms while `startedAt` is set, so the candidate/aggregator
+ * cards show a live elapsed-time counter. Returns the elapsed seconds as
+ * an integer string.
+ */
+function useElapsed(startedAt: number | undefined): string {
+  const [now, setNow] = React.useState(() => Date.now());
+  React.useEffect(() => {
+    if (!startedAt) return;
+    const id = window.setInterval(() => setNow(Date.now()), 250);
+    return () => window.clearInterval(id);
+  }, [startedAt]);
+  if (!startedAt) return "0";
+  return Math.max(0, Math.floor((now - startedAt) / 1000)).toString();
 }
 
 /* -------------------------------------------------------------------------- */

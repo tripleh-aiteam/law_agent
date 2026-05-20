@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { extractLegalElements } from "@/lib/extractor";
 import { isMoaModelId } from "@/lib/models";
-import { moaExtract } from "@/lib/moa";
+import { moaExtract, type MoaProgressEvent } from "@/lib/moa";
 
 export const runtime = "nodejs";
 // MoA fans out to 3 models + 1 aggregator. The slowest path can take ~75s,
@@ -15,6 +15,82 @@ const BodySchema = z.object({
   /** Optional gateway model ID (e.g. "anthropic/claude-opus-4-7"). Validated downstream. */
   model: z.string().optional(),
 });
+
+/* -------------------------------------------------------------------------- */
+/* MoA streaming response                                                      */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Stream the MoA pipeline as NDJSON so the UI can render each stage in real
+ * time (3 candidates fanning out → aggregator → final result). One JSON
+ * object per line, terminated by \n. The very last line is either
+ * { type: "final", elements, summary, clarifyingQuestions, candidates }
+ * or { type: "error", message } so the client knows when to stop reading.
+ */
+function streamMoa(
+  narrative: string,
+  locale: "ko" | "en",
+  clientSignal: AbortSignal,
+): Response {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const send = (obj: unknown) => {
+        try {
+          controller.enqueue(encoder.encode(JSON.stringify(obj) + "\n"));
+        } catch {
+          // Controller already closed (client aborted) — swallow.
+        }
+      };
+
+      const onProgress = (event: MoaProgressEvent) => send(event);
+
+      try {
+        const result = await moaExtract(
+          narrative,
+          locale,
+          clientSignal,
+          onProgress,
+        );
+        send({
+          type: "final",
+          elements: result.elements,
+          summary: result.summary,
+          clarifyingQuestions: result.clarifyingQuestions,
+          candidates: result.candidates,
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        // Don't log AbortError — it's expected when the user hits Stop.
+        if (!(err instanceof DOMException) || err.name !== "AbortError") {
+          console.error("[api/extract MoA] failed:", message);
+        }
+        send({ type: "error", message });
+      } finally {
+        try {
+          controller.close();
+        } catch {
+          /* already closed */
+        }
+      }
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "application/x-ndjson; charset=utf-8",
+      // Disable nginx/Vercel buffering so events ship to the browser as
+      // soon as they're emitted (otherwise the user sees nothing until
+      // the whole stream completes).
+      "Cache-Control": "no-cache, no-transform",
+      "X-Accel-Buffering": "no",
+    },
+  });
+}
+
+/* -------------------------------------------------------------------------- */
+/* Route                                                                       */
+/* -------------------------------------------------------------------------- */
 
 export async function POST(req: Request): Promise<Response> {
   let body: unknown;
@@ -32,24 +108,13 @@ export async function POST(req: Request): Promise<Response> {
     );
   }
 
-  try {
-    // Branch: Mixture-of-Agents path vs. single-model path.
-    // MoA fans out to 3 strong models + an aggregator; the single-model
-    // path is the standard extractLegalElements call.
-    if (isMoaModelId(parsed.data.model)) {
-      const result = await moaExtract(
-        parsed.data.narrative,
-        parsed.data.locale,
-        req.signal,
-      );
-      return NextResponse.json({
-        elements: result.elements,
-        summary: result.summary,
-        clarifyingQuestions: result.clarifyingQuestions,
-        candidates: result.candidates,
-      });
-    }
+  // Mixture-of-Agents: stream stage-by-stage so the UI can show the agents
+  // working in parallel. Single-model path stays as a one-shot JSON response.
+  if (isMoaModelId(parsed.data.model)) {
+    return streamMoa(parsed.data.narrative, parsed.data.locale, req.signal);
+  }
 
+  try {
     const { elements, summary, clarifyingQuestions } = await extractLegalElements(
       parsed.data.narrative,
       parsed.data.locale,

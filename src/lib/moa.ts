@@ -35,16 +35,13 @@ import {
   type ClarifyingQuestion,
 } from "./types";
 import { resolveModelForUse } from "./resolve-model";
+import { MOA_AGGREGATOR_MODEL_ID, MOA_ROSTER } from "./models";
 
 /** The roster — strong, viewpoint-diverse, all good at structured output. */
-const MOA_CANDIDATES = [
-  "anthropic/claude-opus-4-7",
-  "openai/gpt-4o",
-  "xai/grok-4",
-] as const;
+const MOA_CANDIDATES = MOA_ROSTER;
 
 /** The aggregator — best legal reasoner we have. */
-const MOA_AGGREGATOR = "anthropic/claude-opus-4-7";
+const MOA_AGGREGATOR = MOA_AGGREGATOR_MODEL_ID;
 
 /** Per-candidate timeout. Aggregator gets its own (longer) timeout below. */
 const CANDIDATE_TIMEOUT_MS = 75_000;
@@ -115,6 +112,24 @@ export type MoaResult = {
     error?: string;
   }>;
 };
+
+/**
+ * Lifecycle events emitted while the MoA pipeline runs. The /api/extract
+ * route forwards these as NDJSON so the UI can render a real-time
+ * visualization (3 cards working in parallel → aggregator → done).
+ */
+export type MoaProgressEvent =
+  | { type: "candidate_start"; modelId: string; candidateIndex: number }
+  | {
+      type: "candidate_done";
+      modelId: string;
+      candidateIndex: number;
+      status: "ok" | "failed";
+      error?: string;
+    }
+  | { type: "aggregator_start"; modelId: string }
+  | { type: "aggregator_done"; status: "ok" | "failed"; error?: string };
+
 
 /** Combine internal timeout with the caller's abort signal. */
 function anySignal(signals: AbortSignal[]): AbortSignal {
@@ -199,6 +214,7 @@ export async function moaExtract(
   narrative: string,
   locale: "ko" | "en",
   clientSignal?: AbortSignal,
+  onProgress?: (event: MoaProgressEvent) => void,
 ): Promise<MoaResult> {
   const userPrompt = [
     `User locale (for summary + clarifyingQuestions): ${locale === "ko" ? "Korean (한국어)" : "English"}`,
@@ -211,10 +227,45 @@ export async function moaExtract(
     "Produce the summary, the Korean legal elements, and 0–4 clarifyingQuestions.",
   ].join("\n");
 
+  const emit = (e: MoaProgressEvent) => {
+    try {
+      onProgress?.(e);
+    } catch {
+      // The route layer's writer may be closed (client aborted) — swallow,
+      // we still want the pipeline to drain cleanly.
+    }
+  };
+
   // Fan out — Promise.allSettled so one failure doesn't kill the others.
-  const settled = await Promise.allSettled(
-    MOA_CANDIDATES.map((id) => runCandidate(id, userPrompt, clientSignal)),
-  );
+  // Each candidate emits start/done events so the UI can render in real
+  // time which model is still working vs. which has returned.
+  const candidatePromises = MOA_CANDIDATES.map((id, i) => {
+    emit({ type: "candidate_start", modelId: id, candidateIndex: i });
+    return runCandidate(id, userPrompt, clientSignal).then(
+      (value) => {
+        emit({
+          type: "candidate_done",
+          modelId: id,
+          candidateIndex: i,
+          status: "ok",
+        });
+        return value;
+      },
+      (err: unknown) => {
+        const message = err instanceof Error ? err.message : String(err);
+        emit({
+          type: "candidate_done",
+          modelId: id,
+          candidateIndex: i,
+          status: "failed",
+          error: message,
+        });
+        throw err;
+      },
+    );
+  });
+
+  const settled = await Promise.allSettled(candidatePromises);
 
   const candidatesAudit: MoaResult["candidates"] = settled.map((s, i) => ({
     modelId: MOA_CANDIDATES[i],
@@ -259,6 +310,7 @@ export async function moaExtract(
 
   // Aggregate — but fall back to the first successful candidate if the
   // aggregator itself fails.
+  emit({ type: "aggregator_start", modelId: MOA_AGGREGATOR });
   let aggregated: Candidate;
   try {
     aggregated = await runAggregator(
@@ -267,15 +319,18 @@ export async function moaExtract(
       narrative,
       clientSignal,
     );
+    emit({ type: "aggregator_done", status: "ok" });
   } catch (err) {
     aggregated = successful[0].value;
+    const message =
+      "Aggregator failed; degraded to first successful candidate: " +
+      (err instanceof Error ? err.message : String(err));
     candidatesAudit.push({
       modelId: MOA_AGGREGATOR,
       status: "failed",
-      error:
-        "Aggregator failed; degraded to first successful candidate: " +
-        (err instanceof Error ? err.message : String(err)),
+      error: message,
     });
+    emit({ type: "aggregator_done", status: "failed", error: message });
   }
 
   const { clarifyingQuestions, summary, ...elements } = aggregated;

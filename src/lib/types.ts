@@ -132,4 +132,28 @@ export interface CaseTurn {
     status: "ok" | "failed";
     error?: string;
   }>;
+  /**
+   * Live per-stage status for an in-flight MoA turn. Driven by the NDJSON
+   * stream from /api/extract. Lets the UI animate three parallel candidate
+   * cards and an aggregator card while the pipeline runs.
+   */
+  moaProgress?: {
+    /** Highest stage reached so far. */
+    stage: "fanning_out" | "aggregating" | "done";
+    candidates: Array<{
+      modelId: string;
+      status: "running" | "ok" | "failed";
+      /** Local timestamp when the candidate started (for the elapsed display). */
+      startedAt?: number;
+      finishedAt?: number;
+      error?: string;
+    }>;
+    aggregator?: {
+      modelId: string;
+      status: "running" | "ok" | "failed";
+      startedAt?: number;
+      finishedAt?: number;
+      error?: string;
+    };
+  };
 }

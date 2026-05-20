@@ -434,9 +434,30 @@ export function CasesProvider({ children }: { children: React.ReactNode }) {
           ...f,
           cases: f.cases.map((c) => {
             if (c.id !== caseId) return c;
-            const turns = (c.turns ?? []).map((t) =>
-              t.id === turnId ? { ...t, ...patch } : t,
-            );
+            const turns = (c.turns ?? []).map((t) => {
+              if (t.id !== turnId) return t;
+              // Functional-patch support for moaProgress: callers (the chat
+              // input's stream handler) can pass a function that receives the
+              // PREVIOUS moaProgress and returns the next. This lets stream
+              // events merge correctly without each call needing to read
+              // state first.
+              const moaProgressPatch = patch.moaProgress;
+              const resolvedMoaProgress =
+                typeof moaProgressPatch === "function"
+                  ? (
+                      moaProgressPatch as unknown as (
+                        prev: CaseTurn["moaProgress"],
+                      ) => CaseTurn["moaProgress"]
+                    )(t.moaProgress)
+                  : moaProgressPatch;
+              return {
+                ...t,
+                ...patch,
+                ...(moaProgressPatch !== undefined
+                  ? { moaProgress: resolvedMoaProgress }
+                  : {}),
+              };
+            });
             // Mirror the LATEST completed turn's answer onto the case-level
             // fields so legacy readers (CaseDashboard) keep working.
             const latest = turns[turns.length - 1];

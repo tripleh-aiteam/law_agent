@@ -46,6 +46,20 @@ export interface ModelOption {
  */
 export const MOA_MODEL_ID = "auto/mixture-of-agents";
 
+/**
+ * The candidate roster for Mixture-of-Agents. Defined here (client-safe)
+ * so the UI can seed its progress visualization before any server event
+ * arrives, AND so src/lib/moa.ts uses the same canonical list.
+ */
+export const MOA_ROSTER: readonly string[] = [
+  "anthropic/claude-opus-4-7",
+  "openai/gpt-4o",
+  "xai/grok-4",
+];
+
+/** The aggregator model that synthesizes the candidate outputs. */
+export const MOA_AGGREGATOR_MODEL_ID = "anthropic/claude-opus-4-7";
+
 /** Selectable models. Order matters — the UI renders them in this order. */
 export const MODEL_OPTIONS: ModelOption[] = [
   // ─── Mixture-of-Agents (pinned to the top of the selector) ─────────

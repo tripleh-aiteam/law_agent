@@ -15,6 +15,7 @@ import {
 import { useCases } from "@/components/cases/cases-context";
 import { ActionChips } from "@/components/chat/action-chips";
 import { cn } from "@/lib/utils";
+import { MOA_ROSTER, isMoaModelId } from "@/lib/models";
 import type {
   CaseTurn,
   ClarifyingQuestion,
@@ -50,6 +51,35 @@ interface ExtractResponse {
     error?: string;
   }>;
 }
+
+/**
+ * Server-emitted lifecycle events for a Mixture-of-Agents streaming call.
+ * Mirrors src/lib/moa.ts MoaProgressEvent — kept as a local type so the
+ * client doesn't import server-only modules.
+ */
+type MoaStreamEvent =
+  | { type: "candidate_start"; modelId: string; candidateIndex: number }
+  | {
+      type: "candidate_done";
+      modelId: string;
+      candidateIndex: number;
+      status: "ok" | "failed";
+      error?: string;
+    }
+  | { type: "aggregator_start"; modelId: string }
+  | { type: "aggregator_done"; status: "ok" | "failed"; error?: string }
+  | {
+      type: "final";
+      elements: LegalElements;
+      summary: string;
+      clarifyingQuestions: ClarifyingQuestion[];
+      candidates: Array<{
+        modelId: string;
+        status: "ok" | "failed";
+        error?: string;
+      }>;
+    }
+  | { type: "error"; message: string };
 
 interface SearchResponse {
   matches: PrecedentMatch[];
@@ -88,6 +118,237 @@ function getSpeechRecognitionCtor():
 
 function uid() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Extract helpers (single-model vs MoA streaming)                             */
+/* -------------------------------------------------------------------------- */
+
+async function runSingleExtract(args: {
+  narrative: string;
+  locale: string;
+  modelId?: string;
+  signal: AbortSignal;
+}): Promise<ExtractResponse> {
+  const res = await fetch("/api/extract", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      narrative: args.narrative,
+      locale: args.locale,
+      model: args.modelId,
+    }),
+    signal: args.signal,
+  });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => null)) as
+      | { error?: string }
+      | null;
+    throw new Error(body?.error ?? `Extract failed: ${res.status}`);
+  }
+  return (await res.json()) as ExtractResponse;
+}
+
+/**
+ * Drive the NDJSON stream from /api/extract when MoA is selected. Each line
+ * is one `MoaStreamEvent`. We forward every non-final event to `onEvent`
+ * (so the UI animates), and resolve with the final extraction payload when
+ * the `final` event arrives. The `error` event rejects the promise.
+ */
+async function runMoaStream(args: {
+  narrative: string;
+  locale: string;
+  signal: AbortSignal;
+  onEvent: (event: MoaStreamEvent) => void;
+}): Promise<ExtractResponse> {
+  const res = await fetch("/api/extract", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      narrative: args.narrative,
+      locale: args.locale,
+      // Send the MoA marker so the route streams instead of returning JSON.
+      model: "auto/mixture-of-agents",
+    }),
+    signal: args.signal,
+  });
+  if (!res.ok || !res.body) {
+    const body = (await res.json().catch(() => null)) as
+      | { error?: string }
+      | null;
+    throw new Error(body?.error ?? `Extract failed: ${res.status}`);
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let finalPayload: ExtractResponse | null = null;
+
+  // Read until the stream ends or we see a "final"/"error" event.
+  while (true) {
+    const { value, done } = await reader.read();
+    if (value) buffer += decoder.decode(value, { stream: true });
+
+    // Split on newline. The last fragment (no trailing \n yet) stays in
+    // the buffer for the next iteration.
+    let nl = buffer.indexOf("\n");
+    while (nl !== -1) {
+      const line = buffer.slice(0, nl).trim();
+      buffer = buffer.slice(nl + 1);
+      if (line.length > 0) {
+        let event: MoaStreamEvent;
+        try {
+          event = JSON.parse(line) as MoaStreamEvent;
+        } catch {
+          // Malformed line — skip rather than abort the whole pipeline.
+          nl = buffer.indexOf("\n");
+          continue;
+        }
+        if (event.type === "final") {
+          finalPayload = {
+            elements: event.elements,
+            summary: event.summary,
+            clarifyingQuestions: event.clarifyingQuestions,
+            candidates: event.candidates,
+          };
+          // Still let the UI mark all stages as done.
+          args.onEvent(event);
+        } else if (event.type === "error") {
+          throw new Error(event.message);
+        } else {
+          args.onEvent(event);
+        }
+      }
+      nl = buffer.indexOf("\n");
+    }
+
+    if (done) break;
+  }
+
+  if (!finalPayload) {
+    throw new Error("MoA stream ended without a final result");
+  }
+  return finalPayload;
+}
+
+/**
+ * Apply a single MoaStreamEvent to the turn's `moaProgress`, using the
+ * latest snapshot from React state via a functional update. We keep this
+ * logic outside the component so it can be unit-tested independently if
+ * we ever add coverage for it.
+ */
+function applyMoaEvent(
+  caseId: string,
+  turnId: string,
+  event: MoaStreamEvent,
+  updateTurn: (
+    caseId: string,
+    turnId: string,
+    patch: Partial<CaseTurn>,
+  ) => void,
+) {
+  // We need the previous moaProgress to merge into. The updateTurn signature
+  // is patch-style, so we read the prior state via a closure trick — the
+  // chat-input call passes the LATEST state. To keep this simple, we use a
+  // builder over a fresh skeleton each call and let updateTurn's mirror
+  // logic do the rest. The caller seeds initial moaProgress on appendTurn,
+  // so subsequent events only need to PATCH the relevant slot.
+  if (event.type === "candidate_start") {
+    updateTurn(caseId, turnId, {
+      moaProgress: mergePatch((prev) => {
+        const candidates = [...(prev?.candidates ?? [])];
+        const i = candidates.findIndex((c) => c.modelId === event.modelId);
+        const next = {
+          modelId: event.modelId,
+          status: "running" as const,
+          startedAt: Date.now(),
+        };
+        if (i >= 0) candidates[i] = { ...candidates[i], ...next };
+        else candidates.push(next);
+        return {
+          stage: prev?.stage ?? "fanning_out",
+          candidates,
+          aggregator: prev?.aggregator,
+        };
+      }),
+    });
+  } else if (event.type === "candidate_done") {
+    updateTurn(caseId, turnId, {
+      moaProgress: mergePatch((prev) => {
+        const candidates = [...(prev?.candidates ?? [])];
+        const i = candidates.findIndex((c) => c.modelId === event.modelId);
+        const patch = {
+          status: event.status,
+          finishedAt: Date.now(),
+          error: event.error,
+        };
+        if (i >= 0)
+          candidates[i] = { ...candidates[i], ...patch };
+        return {
+          stage: prev?.stage ?? "fanning_out",
+          candidates,
+          aggregator: prev?.aggregator,
+        };
+      }),
+    });
+  } else if (event.type === "aggregator_start") {
+    updateTurn(caseId, turnId, {
+      moaProgress: mergePatch((prev) => ({
+        stage: "aggregating",
+        candidates: prev?.candidates ?? [],
+        aggregator: {
+          modelId: event.modelId,
+          status: "running",
+          startedAt: Date.now(),
+        },
+      })),
+    });
+  } else if (event.type === "aggregator_done") {
+    updateTurn(caseId, turnId, {
+      moaProgress: mergePatch((prev) => ({
+        stage: "done",
+        candidates: prev?.candidates ?? [],
+        aggregator: prev?.aggregator
+          ? {
+              ...prev.aggregator,
+              status: event.status,
+              finishedAt: Date.now(),
+              error: event.error,
+            }
+          : undefined,
+      })),
+    });
+  } else if (event.type === "final") {
+    updateTurn(caseId, turnId, {
+      moaProgress: mergePatch((prev) => ({
+        stage: "done",
+        candidates: prev?.candidates ?? [],
+        aggregator: prev?.aggregator,
+      })),
+    });
+  }
+}
+
+/**
+ * Tiny marker type used so updateTurn can be called twice — the second call
+ * carries a function that the cases-context applies against the LATEST
+ * moaProgress. We piggyback on the existing `Partial<CaseTurn>` patch by
+ * passing the function under the `moaProgress` key; the context unwraps it.
+ *
+ * (See cases-context.tsx `updateTurn` — it detects when a patch's
+ * `moaProgress` field is a function and calls it with the prior value.)
+ */
+type MoaProgressUpdater = (
+  prev: CaseTurn["moaProgress"],
+) => NonNullable<CaseTurn["moaProgress"]>;
+
+function mergePatch(
+  fn: MoaProgressUpdater,
+): NonNullable<CaseTurn["moaProgress"]> {
+  // The "function disguised as data" trick. cases-context.tsx checks
+  // `typeof patch.moaProgress === "function"` and calls it with the
+  // previous value to compute the new one.
+  return fn as unknown as NonNullable<CaseTurn["moaProgress"]>;
 }
 
 export function ChatInput() {
@@ -389,6 +650,7 @@ export function ChatInput() {
     // Q + a loading bubble. The Stop button uses this turn's id to know
     // which one to mark cancelled.
     const turnId = uid();
+    const usingMoa = isMoaModelId(selectedModelId);
     const pendingTurn: CaseTurn = {
       id: turnId,
       question:
@@ -401,6 +663,19 @@ export function ChatInput() {
       attachmentNames: attachmentNames.length > 0 ? attachmentNames : undefined,
       narrative,
       status: "pending",
+      // Seed the MoA visualization immediately so the user sees all 3
+      // candidate cards appear the moment they hit Send — no awkward gap
+      // while we wait for the first server event to arrive.
+      moaProgress: usingMoa
+        ? {
+            stage: "fanning_out",
+            candidates: MOA_ROSTER.map((modelId) => ({
+              modelId,
+              status: "running" as const,
+              startedAt: Date.now(),
+            })),
+          }
+        : undefined,
     };
     appendTurn(targetId, pendingTurn);
 
@@ -416,25 +691,20 @@ export function ChatInput() {
     setIsSending(true);
 
     try {
-      const exRes = await fetch("/api/extract", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          narrative,
-          locale,
-          model: selectedModelId ?? undefined,
-        }),
-        signal: ac.signal,
-      });
-      if (!exRes.ok) {
-        const body = (await exRes.json().catch(() => null)) as
-          | { error?: string }
-          | null;
-        throw new Error(
-          body?.error ?? `Extract failed: ${exRes.status}`,
-        );
-      }
-      const exData = (await exRes.json()) as ExtractResponse;
+      const exData: ExtractResponse = usingMoa
+        ? await runMoaStream({
+            narrative,
+            locale,
+            signal: ac.signal,
+            onEvent: (event) =>
+              applyMoaEvent(targetId, turnId, event, updateTurn),
+          })
+        : await runSingleExtract({
+            narrative,
+            locale,
+            modelId: selectedModelId ?? undefined,
+            signal: ac.signal,
+          });
 
       // Persist summary + elements + (optional) MoA audit onto the turn
       // right away — even if search fails afterwards, the user still sees
