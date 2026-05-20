@@ -17,8 +17,8 @@
 export type ModelFamily =
   | "anthropic"
   | "openai"
-  | "groq"
   | "google"
+  | "groq"
   | "manus";
 
 export type ModelTier = "premium" | "balanced" | "fast";
@@ -94,6 +94,18 @@ export const MODEL_OPTIONS: ModelOption[] = [
     korean: 5,
   },
 
+  // ─── Gemini (cross-vendor viewpoint) ────────────────────────────────
+  {
+    id: "google/gemini-3.1-pro-preview",
+    displayName: "Gemini 3.1 Pro Preview",
+    family: "google",
+    tier: "premium",
+    description:
+      "Google's flagship preview. Different vendor than Anthropic/OpenAI — cross-checks the dominant axis. Needs GOOGLE_GENERATIVE_AI_API_KEY on Vercel. ~$0.04/query.",
+    korean: 4,
+    experimental: true,
+  },
+
   // ─── Free LLMs (via Groq — open-weight flagships, no per-query cost) ─
   // Groq's free tier hosts powerful open-weight models at ~500 tok/s. All
   // three picks below support strict json_schema (verified in production).
@@ -125,18 +137,6 @@ export const MODEL_OPTIONS: ModelOption[] = [
     description:
       "FREE — Moonshot's Kimi K2 via Groq. 1M context, strong Korean / Chinese / Japanese (CJK was a key training focus). Best free pick for Korean legal nuance. No per-query cost.",
     korean: 4,
-  },
-
-  // ─── Gemini (cross-vendor viewpoint) ────────────────────────────────
-  {
-    id: "google/gemini-3.1-pro-preview",
-    displayName: "Gemini 3.1 Pro Preview",
-    family: "google",
-    tier: "premium",
-    description:
-      "Google's flagship preview. Different vendor than Anthropic/OpenAI — cross-checks the dominant axis. Needs GOOGLE_GENERATIVE_AI_API_KEY on Vercel. ~$0.04/query.",
-    korean: 4,
-    experimental: true,
   },
 ];
 
@@ -244,8 +244,8 @@ export function safeModelIds(input: readonly string[] | null | undefined): strin
 export const FAMILY_LABELS: Record<ModelFamily, { ko: string; en: string }> = {
   anthropic: { ko: "Claude", en: "Claude" },
   openai: { ko: "ChatGPT", en: "ChatGPT" },
-  groq: { ko: "무료 LLM", en: "Free LLMs" },
   google: { ko: "Gemini", en: "Gemini" },
+  groq: { ko: "무료 LLM", en: "Free LLMs" },
   manus: { ko: "Manus", en: "Manus" },
 };
 
