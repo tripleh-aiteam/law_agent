@@ -2,7 +2,12 @@
 
 import * as React from "react";
 
-import type { CaseQuestion, LegalElements, PrecedentMatch } from "@/lib/types";
+import type {
+  CaseQuestion,
+  CaseTurn,
+  LegalElements,
+  PrecedentMatch,
+} from "@/lib/types";
 
 export type CaseFile = {
   id: string;
@@ -10,11 +15,21 @@ export type CaseFile = {
   /** Translation key (e.g. "sidebar.untitledCase") used instead of `name` when the
    * name was system-generated. Cleared once the user explicitly renames. */
   nameKey?: string;
+  /** Latest combined narrative — kept so legacy CaseDashboard still works. */
   narrative: string;
+  /** Mirrors the LATEST turn's elements; kept for any legacy reader. */
   elements?: LegalElements;
+  /** Mirrors the LATEST turn's matches; kept for any legacy reader. */
   matches?: PrecedentMatch[];
-  /** Append-only log of each question the user has asked under this case. */
+  /** @deprecated Replaced by `turns`; only retained for back-compat hydration. */
   questions?: CaseQuestion[];
+  /**
+   * Ordered list of conversation turns. Each turn pairs ONE user question
+   * with its OWN answer payload (summary + elements + matches). Oldest first
+   * — the UI renders top-to-bottom so the most recent turn is at the bottom,
+   * directly above the input box (Manus-style).
+   */
+  turns?: CaseTurn[];
   createdAt: string;
   updatedAt: string;
 };
@@ -56,8 +71,19 @@ type CasesContextValue = {
   updateCase: (
     caseId: string,
     patch: Partial<
-      Pick<CaseFile, "narrative" | "elements" | "matches" | "name" | "questions">
+      Pick<
+        CaseFile,
+        "narrative" | "elements" | "matches" | "name" | "questions" | "turns"
+      >
     >,
+  ) => void;
+  /** Append a brand-new turn (Q with no answer yet) and return its id. */
+  appendTurn: (caseId: string, turn: CaseTurn) => void;
+  /** Patch fields on one turn (e.g. attach an answer, mark cancelled). */
+  updateTurn: (
+    caseId: string,
+    turnId: string,
+    patch: Partial<CaseTurn>,
   ) => void;
 };
 
@@ -365,12 +391,65 @@ export function CasesProvider({ children }: { children: React.ReactNode }) {
     (
       caseId: string,
       patch: Partial<
-        Pick<CaseFile, "narrative" | "elements" | "matches" | "name" | "questions">
+        Pick<
+          CaseFile,
+          "narrative" | "elements" | "matches" | "name" | "questions" | "turns"
+        >
       >,
     ) => {
       setState((s) => ({
         ...s,
         folders: updateCaseInTree(s.folders, caseId, patch),
+      }));
+    },
+    [],
+  );
+
+  const appendTurn = React.useCallback(
+    (caseId: string, turn: CaseTurn) => {
+      setState((s) => ({
+        ...s,
+        folders: mapFolders(s.folders, (f) => ({
+          ...f,
+          cases: f.cases.map((c) =>
+            c.id === caseId
+              ? {
+                  ...c,
+                  turns: [...(c.turns ?? []), turn],
+                  updatedAt: nowIso(),
+                }
+              : c,
+          ),
+        })),
+      }));
+    },
+    [],
+  );
+
+  const updateTurn = React.useCallback(
+    (caseId: string, turnId: string, patch: Partial<CaseTurn>) => {
+      setState((s) => ({
+        ...s,
+        folders: mapFolders(s.folders, (f) => ({
+          ...f,
+          cases: f.cases.map((c) => {
+            if (c.id !== caseId) return c;
+            const turns = (c.turns ?? []).map((t) =>
+              t.id === turnId ? { ...t, ...patch } : t,
+            );
+            // Mirror the LATEST completed turn's answer onto the case-level
+            // fields so legacy readers (CaseDashboard) keep working.
+            const latest = turns[turns.length - 1];
+            const mirror =
+              latest && latest.status === "complete"
+                ? {
+                    elements: latest.elements ?? c.elements,
+                    matches: latest.matches ?? c.matches,
+                  }
+                : {};
+            return { ...c, turns, ...mirror, updatedAt: nowIso() };
+          }),
+        })),
       }));
     },
     [],
@@ -411,6 +490,8 @@ export function CasesProvider({ children }: { children: React.ReactNode }) {
     renameCase,
     selectCase,
     updateCase,
+    appendTurn,
+    updateTurn,
   };
 
   return (

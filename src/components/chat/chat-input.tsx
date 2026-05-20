@@ -8,6 +8,7 @@ import {
   Mic,
   MicOff,
   Paperclip,
+  Square,
   X,
 } from "lucide-react";
 
@@ -15,13 +16,11 @@ import { useCases } from "@/components/cases/cases-context";
 import { ActionChips } from "@/components/chat/action-chips";
 import { cn } from "@/lib/utils";
 import type {
-  CaseQuestion,
+  CaseTurn,
   ClarifyingQuestion,
   LegalElements,
   PrecedentMatch,
 } from "@/lib/types";
-
-type Phase = "idle" | "extracting" | "searching";
 
 /** A file the user attached as context. Stays visible as a chip above the
  *  textarea until the user removes it OR sends the message. */
@@ -42,6 +41,7 @@ type Attachment = {
 
 interface ExtractResponse {
   elements: LegalElements;
+  summary: string;
   clarifyingQuestions: ClarifyingQuestion[];
 }
 
@@ -89,16 +89,16 @@ export function ChatInput() {
   const tCommon = useTranslations("common");
   const locale = useLocale();
   const {
-    currentCase,
     currentCaseId,
     createCase,
-    updateCase,
     selectCase,
     selectedModelId,
+    appendTurn,
+    updateTurn,
   } = useCases();
 
   const [value, setValue] = React.useState("");
-  const [phase, setPhase] = React.useState<Phase>("idle");
+  const [isSending, setIsSending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [attachments, setAttachments] = React.useState<Attachment[]>([]);
   const [isDragOver, setIsDragOver] = React.useState(false);
@@ -112,6 +112,11 @@ export function ChatInput() {
     null,
   );
 
+  /** AbortController for the in-flight extract+search pipeline. Stored in a
+   * ref (not state) because clicking Stop must fire the abort synchronously
+   * — React state updates would queue the abort behind a re-render. */
+  const abortRef = React.useRef<AbortController | null>(null);
+
   // Detect Web Speech API after mount only — checking `window` during SSR/hydration
   // would render different markup on server vs client and break hydration.
   const [speechSupported, setSpeechSupported] = React.useState(false);
@@ -121,16 +126,16 @@ export function ChatInput() {
     setSpeechSupported(ctor !== null);
   }, []);
 
-  // On case switch: clear the textarea + attachments. The textarea is for the
-  // NEXT question; past questions are visible in the history panel above.
-  // We deliberately do NOT auto-fill from currentCase.narrative because that
-  // could include extracted file text from old sessions (pre-Manus refactor).
+  // On case switch: clear textarea + attachments + abort any in-flight pipeline.
   React.useEffect(() => {
     setValue("");
     setAttachments([]);
+    abortRef.current?.abort();
+    abortRef.current = null;
+    setIsSending(false);
   }, [currentCaseId]);
 
-  // Autoresize.
+  // Autoresize the textarea up to ~6 lines, then scroll.
   React.useEffect(() => {
     const el = textareaRef.current;
     if (!el) return;
@@ -139,18 +144,10 @@ export function ChatInput() {
     el.style.height = `${Math.min(el.scrollHeight, max)}px`;
   }, [value]);
 
-  const insertText = React.useCallback((extra: string) => {
-    setValue((prev) => {
-      if (!prev.trim()) return extra;
-      return `${prev.trim()}\n\n${extra}`;
-    });
-  }, []);
-
   const replaceWithPrefix = React.useCallback((prefix: string) => {
     setValue((prev) => {
       const trimmed = prev.trim();
       if (trimmed.startsWith(prefix)) return prev;
-      // If existing text is empty, just put the prefix.
       if (!trimmed) return prefix;
       return `${prefix}${trimmed}`;
     });
@@ -243,9 +240,9 @@ export function ChatInput() {
    *  question is placed FIRST and clearly labeled so the LLM treats it
    *  as the primary signal, with files as supplementary context. */
   const buildNarrative = React.useCallback(
-    (question: string): string => {
+    (question: string, currentAttachments: Attachment[]): string => {
       const q = question.trim();
-      const ready = attachments.filter(
+      const ready = currentAttachments.filter(
         (a) => a.status === "ready" && a.text.length > 0,
       );
       if (ready.length === 0) return q;
@@ -255,7 +252,7 @@ export function ChatInput() {
       if (!q) return fileBlocks;
       return `[사용자 질의 / User question]\n${q}\n\n---\n\n${fileBlocks}`;
     },
-    [attachments],
+    [],
   );
 
   const onPickFiles = () => {
@@ -354,12 +351,18 @@ export function ChatInput() {
   const hasReadyAttachments = attachments.some((a) => a.status === "ready");
   // Allow sending if the user typed >= 10 chars OR has at least one ready file.
   const canSend =
-    phase === "idle" &&
-    (value.trim().length >= 10 || hasReadyAttachments);
+    !isSending && (value.trim().length >= 10 || hasReadyAttachments);
+
+  const onStop = () => {
+    // Synchronously abort the in-flight fetches. The catch block in onSend
+    // will mark the turn as "cancelled".
+    abortRef.current?.abort();
+  };
 
   const onSend = async () => {
     const questionText = value.trim();
-    const narrative = buildNarrative(value);
+    const snapshotAttachments = attachments;
+    const narrative = buildNarrative(value, snapshotAttachments);
     if (!narrative) return;
 
     // Make sure we have an active case to write into.
@@ -370,43 +373,71 @@ export function ChatInput() {
       selectCase(targetId);
     }
 
-    // Snapshot of attached filenames at ask-time (so the history shows them
-    // even after we clear the attachments after send).
-    const attachmentNames = attachments
+    // Snapshot of attached filenames at ask-time so the turn shows them even
+    // after we clear the attachments after send.
+    const attachmentNames = snapshotAttachments
       .filter((a) => a.status === "ready")
       .map((a) => a.filename);
 
-    // Append the user's question to the history BEFORE the API call so it's
-    // visible immediately. If the API fails we still keep the question in
-    // history — they can re-send.
-    const newQuestion: CaseQuestion = {
-      id: uid(),
-      text: questionText || (attachmentNames.length > 0 ? "(첨부파일 분석 요청)" : ""),
+    // Create the turn with status="pending" so the thread immediately shows
+    // Q + a loading bubble. The Stop button uses this turn's id to know
+    // which one to mark cancelled.
+    const turnId = uid();
+    const pendingTurn: CaseTurn = {
+      id: turnId,
+      question:
+        questionText ||
+        (attachmentNames.length > 0
+          ? attachmentNames.join(", ")
+          : ""),
       createdAt: new Date().toISOString(),
       modelId: selectedModelId ?? undefined,
       attachmentNames: attachmentNames.length > 0 ? attachmentNames : undefined,
-    };
-    const existingQuestions = currentCase?.questions ?? [];
-    updateCase(targetId, {
       narrative,
-      questions: [...existingQuestions, newQuestion],
-    });
+      status: "pending",
+    };
+    appendTurn(targetId, pendingTurn);
 
-    setPhase("extracting");
+    // Clear textarea + attachments immediately. The Q is now part of the
+    // thread; the input is ready for the next question even while this one
+    // is still running (Manus-style).
+    setValue("");
+    setAttachments([]);
     setError(null);
+
+    const ac = new AbortController();
+    abortRef.current = ac;
+    setIsSending(true);
 
     try {
       const exRes = await fetch("/api/extract", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ narrative, locale, model: selectedModelId ?? undefined }),
+        body: JSON.stringify({
+          narrative,
+          locale,
+          model: selectedModelId ?? undefined,
+        }),
+        signal: ac.signal,
       });
-      if (!exRes.ok) throw new Error(`Extract failed: ${exRes.status}`);
+      if (!exRes.ok) {
+        const body = (await exRes.json().catch(() => null)) as
+          | { error?: string }
+          | null;
+        throw new Error(
+          body?.error ?? `Extract failed: ${exRes.status}`,
+        );
+      }
       const exData = (await exRes.json()) as ExtractResponse;
 
-      updateCase(targetId, { elements: exData.elements });
+      // Persist summary + elements onto the turn right away — even if search
+      // fails afterwards, the user still sees the document summary (which
+      // is the main thing they want for "summarize this PDF" requests).
+      updateTurn(targetId, turnId, {
+        elements: exData.elements,
+        summary: exData.summary,
+      });
 
-      setPhase("searching");
       const srRes = await fetch("/api/search", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -416,20 +447,40 @@ export function ChatInput() {
           locale,
           model: selectedModelId ?? undefined,
         }),
+        signal: ac.signal,
       });
-      if (!srRes.ok) throw new Error(`Search failed: ${srRes.status}`);
-      const srData = (await srRes.json()) as SearchResponse;
-      updateCase(targetId, { matches: srData.matches ?? [] });
-      // Clear textarea + attachments after successful send. The question
-      // is now preserved in the history panel above, and a new
-      // empty input is ready for a follow-up.
-      setValue("");
-      setAttachments([]);
-      setPhase("idle");
-    } catch (err) {
-      console.error(err);
-      setError(err instanceof Error ? err.message : String(err));
-      setPhase("idle");
+      if (!srRes.ok) {
+        // Search failed but we still have a summary — keep the turn
+        // "complete" with whatever we have rather than marking the whole
+        // turn as errored.
+        updateTurn(targetId, turnId, {
+          status: "complete",
+          matches: [],
+        });
+      } else {
+        const srData = (await srRes.json()) as SearchResponse;
+        updateTurn(targetId, turnId, {
+          status: "complete",
+          matches: srData.matches ?? [],
+        });
+      }
+    } catch (err: unknown) {
+      // AbortError → Stop button was pressed.
+      if (
+        err instanceof DOMException && err.name === "AbortError"
+      ) {
+        updateTurn(targetId, turnId, { status: "cancelled" });
+      } else {
+        const message = err instanceof Error ? err.message : String(err);
+        updateTurn(targetId, turnId, {
+          status: "error",
+          error: message,
+        });
+        setError(message);
+      }
+    } finally {
+      if (abortRef.current === ac) abortRef.current = null;
+      setIsSending(false);
     }
   };
 
@@ -440,16 +491,8 @@ export function ChatInput() {
     }
   };
 
-  const isBusy = phase !== "idle";
-  const questionHistory = currentCase?.questions ?? [];
-
   return (
-    <div className="space-y-4">
-      {/* Question history — appears above the input when the case has
-          past questions. Each is numbered (Q1, Q2, ...) and bolded so
-          the user can quickly recall what they've asked. */}
-      {questionHistory.length > 0 && <QuestionHistoryPanel questions={questionHistory} />}
-
+    <div className="space-y-3">
       <div
         onDragOver={(e) => {
           e.preventDefault();
@@ -471,8 +514,7 @@ export function ChatInput() {
         )}
 
         {/* Attachment chip area — shows above the textarea so users see
-            their files as CONTEXT, separate from their question. Each chip
-            includes filename, size, status, and a remove button.            */}
+            their files as CONTEXT, separate from their question. */}
         {attachments.length > 0 && (
           <div className="flex flex-wrap gap-2 border-b border-slate-100 px-4 pt-3 pb-3">
             {attachments.map((a) => (
@@ -539,9 +581,8 @@ export function ChatInput() {
               ? tChat("placeholderWithFiles")
               : tChat("placeholder")
           }
-          disabled={isBusy}
           rows={4}
-          className="block w-full resize-none rounded-2xl bg-transparent px-5 pt-5 pb-2 text-[16px] font-medium leading-relaxed text-slate-900 outline-none placeholder:font-normal placeholder:text-slate-400 disabled:opacity-60"
+          className="block w-full resize-none rounded-2xl bg-transparent px-5 pt-5 pb-2 text-[16px] font-medium leading-relaxed text-slate-900 outline-none placeholder:font-normal placeholder:text-slate-400"
           style={{ minHeight: 120 }}
         />
 
@@ -558,8 +599,7 @@ export function ChatInput() {
             <button
               type="button"
               onClick={onPickFiles}
-              disabled={isBusy}
-              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 disabled:opacity-50"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700"
               title={tChat("attachFile")}
               aria-label={tChat("attachFile")}
             >
@@ -569,9 +609,8 @@ export function ChatInput() {
               <button
                 type="button"
                 onClick={toggleRecording}
-                disabled={isBusy}
                 className={cn(
-                  "inline-flex h-8 w-8 items-center justify-center rounded-md transition-colors disabled:opacity-50",
+                  "inline-flex h-8 w-8 items-center justify-center rounded-md transition-colors",
                   isRecording
                     ? "animate-pulse bg-rose-600 text-white hover:bg-rose-700"
                     : "text-slate-500 hover:bg-slate-100 hover:text-slate-700",
@@ -593,29 +632,39 @@ export function ChatInput() {
             )}
           </div>
           <div className="flex items-center gap-2">
-            {isBusy && (
+            {isSending && (
               <span className="inline-flex items-center gap-1.5 text-xs text-slate-500">
                 <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
-                {phase === "extracting"
-                  ? tChat("extracting")
-                  : tCommon("searching")}
+                {tChat("thinking")}
               </span>
             )}
-            <button
-              type="button"
-              onClick={onSend}
-              disabled={!canSend}
-              className={cn(
-                "inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-medium transition-colors",
-                canSend
-                  ? "bg-slate-900 text-white hover:bg-slate-800"
-                  : "bg-slate-200 text-slate-400",
-              )}
-              aria-label={tChat("send")}
-            >
-              <ArrowUp className="h-3.5 w-3.5" aria-hidden />
-              {tChat("send")}
-            </button>
+            {isSending ? (
+              <button
+                type="button"
+                onClick={onStop}
+                className="inline-flex items-center gap-1.5 rounded-full bg-rose-600 px-3.5 py-1.5 text-xs font-medium text-white transition-colors hover:bg-rose-700"
+                aria-label={tChat("stop")}
+              >
+                <Square className="h-3 w-3 fill-current" aria-hidden />
+                {tChat("stop")}
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={onSend}
+                disabled={!canSend}
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-medium transition-colors",
+                  canSend
+                    ? "bg-slate-900 text-white hover:bg-slate-800"
+                    : "bg-slate-200 text-slate-400",
+                )}
+                aria-label={tChat("send")}
+              >
+                <ArrowUp className="h-3.5 w-3.5" aria-hidden />
+                {tChat("send")}
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -627,53 +676,6 @@ export function ChatInput() {
       )}
 
       <ActionChips onSelect={replaceWithPrefix} />
-    </div>
-  );
-}
-
-/**
- * Question history — numbered, bolded list of every question the user has
- * sent under the current case file. Helps them remember context across
- * follow-up questions. Persisted in case.questions in localStorage.
- */
-function QuestionHistoryPanel({
-  questions,
-}: {
-  questions: CaseQuestion[];
-}): React.ReactElement {
-  const t = useTranslations("chat");
-  return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-      <div className="mb-2 flex items-center justify-between">
-        <h3 className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-          {t("questionHistory")}
-        </h3>
-        <span className="text-[11px] text-slate-400">
-          {questions.length} {t("questionsCount")}
-        </span>
-      </div>
-      <ol className="space-y-2.5">
-        {questions.map((q, i) => (
-          <li
-            key={q.id}
-            className="flex gap-2.5 rounded-lg bg-slate-50/60 px-3 py-2"
-          >
-            <span className="shrink-0 select-none rounded bg-slate-900 px-1.5 py-0.5 text-[11px] font-bold text-white">
-              Q{i + 1}
-            </span>
-            <div className="min-w-0 flex-1">
-              <p className="text-[14px] font-semibold leading-snug text-slate-900">
-                {q.text}
-              </p>
-              {q.attachmentNames && q.attachmentNames.length > 0 && (
-                <p className="mt-1 truncate text-[11px] text-slate-500">
-                  📎 {q.attachmentNames.join(", ")}
-                </p>
-              )}
-            </div>
-          </li>
-        ))}
-      </ol>
     </div>
   );
 }

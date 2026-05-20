@@ -29,12 +29,15 @@ export async function POST(req: Request): Promise<Response> {
   }
 
   try {
-    const { elements, clarifyingQuestions } = await extractLegalElements(
+    const { elements, summary, clarifyingQuestions } = await extractLegalElements(
       parsed.data.narrative,
       parsed.data.locale,
       parsed.data.model,
+      // Forward the client's abort signal so the Stop button truly cancels
+      // the upstream LLM call instead of just dropping the response.
+      req.signal,
     );
-    return NextResponse.json({ elements, clarifyingQuestions });
+    return NextResponse.json({ elements, summary, clarifyingQuestions });
   } catch (err: unknown) {
     // Log the full error to Vercel function logs so we can diagnose 500s.
     console.error("[api/extract] failed:", {

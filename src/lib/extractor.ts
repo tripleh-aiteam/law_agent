@@ -12,6 +12,17 @@ import { resolveModelForUse } from "./resolve-model";
  * it actually noticed during extraction.
  */
 const ExtractionResponseSchema = LegalElementsSchema.extend({
+  /**
+   * Manus-style plain-language summary of the input. Always populated — even
+   * when the input is a judgment PDF or a non-case document. This lets the
+   * UI show a useful answer for "summarize this PDF" requests without
+   * needing a separate endpoint.
+   */
+  summary: z
+    .string()
+    .describe(
+      "1–2 paragraphs (4–8 sentences total) in the USER'S LOCALE summarizing the input. If the input is a judgment, summarize the holding + key reasoning. If it is a fact pattern, restate the dispute concisely. Preserve Korean legal terms (판결, 청구원인 등) inline even in English."
+    ),
   clarifyingQuestions: z
     .array(
       z.object({
@@ -28,7 +39,14 @@ type ExtractionResponse = z.infer<typeof ExtractionResponseSchema>;
 
 const SYSTEM_PROMPT = `You are a senior Korean litigation paralegal preparing a fact-pattern for 판례 (case law) retrieval against the Korean Supreme Court (대법원) corpus.
 
-Your job is to extract structured legal elements from a user's narrative AND surface the highest-impact clarifying questions a Korean attorney would ask before relying on retrieved 판례.
+Your job is to (1) write a plain-language summary of the input, (2) extract structured legal elements, and (3) surface the highest-impact clarifying questions a Korean attorney would ask before relying on retrieved 판례.
+
+SUMMARY RULES (critical for non-case inputs):
+- ALWAYS produce a summary, even when the input is a court judgment, an academic excerpt, an email thread, or a draft pleading — never refuse and never leave it blank.
+- 1–2 paragraphs, 4–8 sentences total, in the USER'S LOCALE.
+- If the input is a 판결문 (judgment): identify the court, the parties, the holding, and the key reasoning. Name the controlling statute.
+- If the input is a fact pattern: restate the dispute, the parties' positions, and what the user is asking the system to do.
+- Preserve Korean legal terms inline (e.g. 판시사항, 청구원인) even when the rest of the summary is English.
 
 LANGUAGE RULES (critical):
 - ALL extracted legal elements (청구원인, 법률관계, 쟁점, 당사자 지위, 손해 종류, 적용 법령, keyFacts, missingInfo, parties) MUST be written in Korean, regardless of the input language. This is because the 판례 corpus is Korean and the extraction is used directly for semantic retrieval.
@@ -82,25 +100,50 @@ function trimMiddle(narrative: string): string {
 }
 
 /**
- * Extracts structured Korean legal elements and clarifying questions from a
- * free-form narrative. Elements are always Korean; clarifying questions are
- * in the caller's locale.
+ * Combines two AbortSignals into one — fires when either fires. Used so the
+ * extractor honors both an internal timeout and the request's client-abort
+ * signal (Stop button → fetch.abort()).
+ */
+function anySignal(signals: AbortSignal[]): AbortSignal {
+  const ctl = new AbortController();
+  for (const s of signals) {
+    if (s.aborted) {
+      ctl.abort(s.reason);
+      break;
+    }
+    s.addEventListener("abort", () => ctl.abort(s.reason), { once: true });
+  }
+  return ctl.signal;
+}
+
+/**
+ * Extracts a plain-language summary, structured Korean legal elements, and
+ * clarifying questions from a free-form narrative. Summary + clarifying
+ * questions are in the caller's locale; elements are always Korean (used
+ * downstream for semantic retrieval against the Korean corpus).
  */
 export async function extractLegalElements(
   narrative: string,
   locale: "ko" | "en",
   modelId?: string,
-): Promise<{ elements: LegalElements; clarifyingQuestions: ClarifyingQuestion[] }> {
+  clientSignal?: AbortSignal,
+): Promise<{
+  elements: LegalElements;
+  summary: string;
+  clarifyingQuestions: ClarifyingQuestion[];
+}> {
   const trimmedNarrative = trimMiddle(narrative.trim());
   const userPrompt = [
-    `User locale (for clarifyingQuestions only): ${locale === "ko" ? "Korean (한국어)" : "English"}`,
+    `User locale (for summary + clarifyingQuestions): ${locale === "ko" ? "Korean (한국어)" : "English"}`,
     "",
-    "Narrative:",
+    "Input:",
     "---",
     trimmedNarrative,
     "---",
     "",
-    "Extract the legal elements in Korean. Write clarifyingQuestions in the user locale above.",
+    "First, write the plain-language summary (user locale).",
+    "Then extract the legal elements in Korean.",
+    "Then write 0–4 clarifyingQuestions in the user locale.",
   ].join("\n");
 
   // Resolve the caller's selected model: prefer a direct provider when its
@@ -110,18 +153,26 @@ export async function extractLegalElements(
     ? (resolveModelForUse(modelId) ?? safeModelId(modelId))
     : EXTRACTION_MODEL;
 
+  // Merge a 90s safety timeout with the client's Stop-button signal so EITHER
+  // can cancel the upstream LLM call promptly.
+  const abortSignal = clientSignal
+    ? anySignal([clientSignal, AbortSignal.timeout(TIMEOUT_MS)])
+    : AbortSignal.timeout(TIMEOUT_MS);
+
   const result = await generateObject({
     model,
     schema: ExtractionResponseSchema,
     system: SYSTEM_PROMPT,
     prompt: userPrompt,
-    abortSignal: AbortSignal.timeout(TIMEOUT_MS),
+    abortSignal,
     maxOutputTokens: 2048,
   });
 
-  const { clarifyingQuestions, ...elements } = result.object as ExtractionResponse;
+  const { clarifyingQuestions, summary, ...elements } =
+    result.object as ExtractionResponse;
   return {
     elements: elements as LegalElements,
+    summary,
     clarifyingQuestions: clarifyingQuestions as ClarifyingQuestion[],
   };
 }

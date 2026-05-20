@@ -144,7 +144,20 @@
     "stopRecording": "음성 입력 중지",
     "dropFiles": "여기에 파일을 놓으세요",
     "extracting": "법적 요소 추출 중...",
-    "untitledCase": "이름 없는 사건"
+    "untitledCase": "이름 없는 사건",
+    "stop": "정지",
+    "thinking": "분석 중...",
+    "stopped": "사용자가 정지함",
+    "stopExplain": "이 응답은 정지되었습니다. 다시 시도하거나 질문을 수정해 보세요.",
+    "errorTurn": "이 응답을 생성하지 못했습니다.",
+    "yourQuestion": "내 질문",
+    "agentAnswer": "Law Agent",
+    "answerSummary": "요약",
+    "topMatches": "유사 판례",
+    "viewDetails": "자세히 보기",
+    "hideDetails": "접기",
+    "emptyThread": "왼쪽에서 사건을 선택하거나 아래에 질문을 입력하세요.",
+    "noMatchesForTurn": "이 질문에서는 유사한 판례를 찾지 못했습니다."
   },
   "chips": {
     "summarize": {

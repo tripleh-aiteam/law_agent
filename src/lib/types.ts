@@ -74,6 +74,9 @@ export interface ClarifyingQuestion {
  * One entry in a case file's question history. Each time the user hits
  * Send, the textarea contents (their question, NOT the combined narrative)
  * are appended here so they can see their conversation history.
+ *
+ * @deprecated Kept only so older localStorage payloads still hydrate. New
+ * code uses CaseTurn, which carries the answer for each question inline.
  */
 export interface CaseQuestion {
   id: string;
@@ -84,4 +87,40 @@ export interface CaseQuestion {
   modelId?: string;
   /** Filenames of attached files at the time of asking — shown for context. */
   attachmentNames?: string[];
+}
+
+/**
+ * Status of one conversation turn (Q → A pair).
+ *  - "pending"    : extract/search still running. Stop button visible.
+ *  - "complete"   : answer populated.
+ *  - "cancelled"  : user clicked Stop; Q stays visible but answer is empty.
+ *  - "error"      : pipeline threw; `error` carries the message.
+ */
+export type TurnStatus = "pending" | "complete" | "cancelled" | "error";
+
+/**
+ * A single conversational exchange under one case. Each Send creates one
+ * turn that carries BOTH the question and its own answer payload — so the
+ * conversation thread can render Q→A→Q→A independently per turn instead
+ * of all questions sharing one global "latest result".
+ */
+export interface CaseTurn {
+  id: string;
+  /** The question text exactly as the user typed it. */
+  question: string;
+  /** ISO timestamp when the user hit Send. */
+  createdAt: string;
+  /** AI model used for this turn (for the receipt). */
+  modelId?: string;
+  /** Filenames attached when the question was sent. */
+  attachmentNames?: string[];
+  /** Full narrative actually sent to /api/extract (question + file text). */
+  narrative?: string;
+  status: TurnStatus;
+  /** Manus-style 1–2 paragraph summary of the input (user locale). */
+  summary?: string;
+  elements?: LegalElements;
+  matches?: PrecedentMatch[];
+  /** Human-readable error message when status === "error". */
+  error?: string;
 }

@@ -144,7 +144,20 @@
     "stopRecording": "Stop voice input",
     "dropFiles": "Drop files to attach",
     "extracting": "Extracting legal elements...",
-    "untitledCase": "Untitled case"
+    "untitledCase": "Untitled case",
+    "stop": "Stop",
+    "thinking": "Thinking...",
+    "stopped": "You stopped this",
+    "stopExplain": "This response was stopped. Re-send or edit your question to try again.",
+    "errorTurn": "This response failed to generate.",
+    "yourQuestion": "Your question",
+    "agentAnswer": "Law Agent",
+    "answerSummary": "Summary",
+    "topMatches": "Similar precedents",
+    "viewDetails": "View details",
+    "hideDetails": "Hide details",
+    "emptyThread": "Pick a case from the sidebar or type a question below.",
+    "noMatchesForTurn": "No similar precedents for this question."
   },
   "chips": {
     "summarize": {
