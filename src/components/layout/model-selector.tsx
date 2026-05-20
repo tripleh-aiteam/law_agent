@@ -29,6 +29,12 @@ const FAMILY_GLYPH: Record<
 > = {
   anthropic: { letter: "C", classes: "bg-orange-100 text-orange-700" },
   openai: { letter: "G", classes: "bg-emerald-100 text-emerald-700" },
+  // Free-tier Groq models — lightning bolt for Groq's "fast inference"
+  // brand identity, teal/green to signal "free / open" visually.
+  groq: {
+    letter: "⚡",
+    classes: "bg-gradient-to-br from-teal-400 to-emerald-600 text-white",
+  },
   google: { letter: "♊", classes: "bg-blue-100 text-blue-700" },
   // Manus uses a hand symbol — the brand mark on manus.im is literally a
   // hand. Purple gradient matches their site's primary accent color.

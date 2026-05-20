@@ -14,6 +14,7 @@
 import { anthropic } from "@ai-sdk/anthropic";
 import { openai } from "@ai-sdk/openai";
 import { google } from "@ai-sdk/google";
+import { groq } from "@ai-sdk/groq";
 import type { LanguageModel } from "ai";
 import { MODEL_OPTIONS, type ModelOption } from "./models";
 
@@ -60,6 +61,13 @@ export function resolveModelForUse(
   }
   if (opt.family === "google" && hasEnv("GOOGLE_GENERATIVE_AI_API_KEY")) {
     return google(modelName);
+  }
+  if (opt.family === "groq" && hasEnv("GROQ_API_KEY")) {
+    // Groq IDs in our registry are prefixed with "groq/" — modelNameFromId
+    // already strips that. For sub-namespaced models like
+    // "groq/openai/gpt-oss-120b" → modelName == "openai/gpt-oss-120b"
+    // which is exactly what Groq's API expects.
+    return groq(modelName);
   }
 
   // No direct key set — last resort is the gateway. Will fail with a

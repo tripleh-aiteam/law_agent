@@ -14,7 +14,12 @@
  * works for direct AND gateway paths (resolve-model.ts handles routing).
  */
 
-export type ModelFamily = "anthropic" | "openai" | "google" | "manus";
+export type ModelFamily =
+  | "anthropic"
+  | "openai"
+  | "groq"
+  | "google"
+  | "manus";
 
 export type ModelTier = "premium" | "balanced" | "fast";
 
@@ -88,24 +93,38 @@ export const MODEL_OPTIONS: ModelOption[] = [
       "Higher-compute GPT-5.5 variant. Use for the hardest cases where you want maximum deliberation. ~$0.15/query.",
     korean: 5,
   },
+
+  // ─── Free LLMs (via Groq — open-weight flagships, no per-query cost) ─
+  // Groq's free tier hosts powerful open-weight models at ~500 tok/s. All
+  // three picks below support strict json_schema (verified in production).
+  // Routed via direct GROQ_API_KEY, NOT the Vercel AI Gateway, so they
+  // don't draw from any paid credit pool.
   {
-    id: "openai/o3-pro",
-    displayName: "o3-pro",
-    family: "openai",
+    id: "groq/openai/gpt-oss-120b",
+    displayName: "GPT-OSS 120B",
+    family: "groq",
     tier: "premium",
     description:
-      "Deep chain-of-thought reasoning specialist. ⚠ REQUIRES VERIFIED ORGANIZATION at platform.openai.com/settings/organization/general. ~$0.20/query.",
-    korean: 4,
-    experimental: true,
+      "FREE — OpenAI's open-weight 120B flagship via Groq. Strong reasoning + reliable JSON. The most powerful free model. No per-query cost.",
+    korean: 3,
   },
   {
-    id: "openai/gpt-4o",
-    displayName: "GPT-4o",
-    family: "openai",
+    id: "groq/meta-llama/llama-4-maverick-17b-128e-instruct",
+    displayName: "Llama 4 Maverick",
+    family: "groq",
     tier: "premium",
     description:
-      "Proven reliable workhorse. Older flagship but extremely well-tested. Excellent JSON-mode reliability. ~$0.07/query.",
-    korean: 5,
+      "FREE — Meta's Llama 4 Maverick (128-expert MoE) via Groq. Strong general reasoning, supports strict json_schema. No per-query cost.",
+    korean: 3,
+  },
+  {
+    id: "groq/moonshotai/kimi-k2-instruct",
+    displayName: "Kimi K2",
+    family: "groq",
+    tier: "premium",
+    description:
+      "FREE — Moonshot's Kimi K2 via Groq. 1M context, strong Korean / Chinese / Japanese (CJK was a key training focus). Best free pick for Korean legal nuance. No per-query cost.",
+    korean: 4,
   },
 
   // ─── Gemini (cross-vendor viewpoint) ────────────────────────────────
@@ -145,11 +164,13 @@ const LEGACY_ID_ALIASES: Record<string, string> = {
   "anthropic/claude-opus-4.6": "anthropic/claude-opus-4.7",
   "anthropic/claude-sonnet-4-5": "anthropic/claude-sonnet-4.6",
   "anthropic/claude-sonnet-4.5": "anthropic/claude-sonnet-4.6",
-  "openai/gpt-4o-mini": "openai/gpt-4o",
-  "openai/o3": "openai/o3-pro",
-  "openai/o3-mini": "openai/o3-pro",
-  "openai/o1": "openai/o3-pro",
-  "openai/o4-mini": "openai/o3-pro",
+  "openai/gpt-4o-mini": "openai/gpt-5.5",
+  "openai/gpt-4o": "openai/gpt-5.5",
+  "openai/o3-pro": "openai/gpt-5.5",
+  "openai/o3": "openai/gpt-5.5",
+  "openai/o3-mini": "openai/gpt-5.5",
+  "openai/o1": "openai/gpt-5.5",
+  "openai/o4-mini": "openai/gpt-5.5",
   "openai/gpt-5.4": "openai/gpt-5.5",
   "openai/gpt-5.4-mini": "openai/gpt-5.5",
   "openai/gpt-5.4-nano": "openai/gpt-5.5",
@@ -160,15 +181,13 @@ const LEGACY_ID_ALIASES: Record<string, string> = {
   "google/gemini-3.1-flash-lite": "google/gemini-3.1-pro-preview",
   // Mixture-of-Agents was removed entirely — fall back to Claude Sonnet
   "auto/mixture-of-agents": "anthropic/claude-sonnet-4.6",
-  // Groq / xAI / DeepSeek / Meta / Mistral all removed
-  "groq/openai/gpt-oss-120b": "openai/gpt-4o",
-  "groq/openai/gpt-oss-20b": "openai/gpt-4o",
-  "groq/meta-llama/llama-4-scout-17b-16e-instruct": "openai/gpt-4o",
-  "groq/meta-llama/llama-4-maverick-17b-128e-instruct": "openai/gpt-4o",
-  "groq/moonshotai/kimi-k2-instruct": "anthropic/claude-sonnet-4.6",
-  "groq/llama-3.3-70b-versatile": "openai/gpt-4o",
-  "groq/llama-3.1-8b-instant": "openai/gpt-4o",
-  "groq/qwen/qwen3-32b": "anthropic/claude-sonnet-4.6",
+  // Groq legacy aliases — gpt-oss-120b / llama-4-maverick / kimi-k2 are
+  // back in the registry as free options, the others migrate to them.
+  "groq/openai/gpt-oss-20b": "groq/openai/gpt-oss-120b",
+  "groq/meta-llama/llama-4-scout-17b-16e-instruct": "groq/meta-llama/llama-4-maverick-17b-128e-instruct",
+  "groq/llama-3.3-70b-versatile": "groq/meta-llama/llama-4-maverick-17b-128e-instruct",
+  "groq/llama-3.1-8b-instant": "groq/meta-llama/llama-4-maverick-17b-128e-instruct",
+  "groq/qwen/qwen3-32b": "groq/moonshotai/kimi-k2-instruct",
   "xai/grok-4": "anthropic/claude-sonnet-4.6",
   "xai/grok-4-heavy": "anthropic/claude-sonnet-4.6",
   "xai/grok-4.3": "anthropic/claude-sonnet-4.6",
@@ -225,6 +244,7 @@ export function safeModelIds(input: readonly string[] | null | undefined): strin
 export const FAMILY_LABELS: Record<ModelFamily, { ko: string; en: string }> = {
   anthropic: { ko: "Claude", en: "Claude" },
   openai: { ko: "ChatGPT", en: "ChatGPT" },
+  groq: { ko: "무료 LLM", en: "Free LLMs" },
   google: { ko: "Gemini", en: "Gemini" },
   manus: { ko: "Manus", en: "Manus" },
 };
