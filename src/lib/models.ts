@@ -321,6 +321,16 @@ export const MODEL_OPTIONS: ModelOption[] = [
     experimental: true,
   },
   {
+    id: "google/gemini-3.5-flash",
+    displayName: "Gemini 3.5 Flash",
+    family: "google",
+    tier: "fast",
+    description:
+      "Newest fast Gemini — 1M context, vision, tool-use, reasoning. Fast and cheap; JSON-schema mode much improved over 2.5.",
+    korean: 4,
+    experimental: true,
+  },
+  {
     id: "google/gemini-2.5-flash",
     displayName: "Gemini 2.5 Flash",
     family: "google",
