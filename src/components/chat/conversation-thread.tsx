@@ -314,8 +314,9 @@ function MoaProgressView({
         </span>
       </div>
 
-      {/* 3 candidate cards, side by side at sm+. Each animates by status. */}
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+      {/* N candidate cards, responsive grid. 1 col on mobile, 2 on tablet,
+          up to 4 on desktop — works for any roster size from 1 to 4. */}
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
         {candidates.map((c) => (
           <CandidateCard key={c.modelId} candidate={c} />
         ))}

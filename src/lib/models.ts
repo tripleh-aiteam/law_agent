@@ -54,22 +54,36 @@ export interface ModelOption {
 export const MOA_MODEL_ID = "auto/mixture-of-agents";
 
 /**
- * The candidate roster for Mixture-of-Agents. THREE strong, viewpoint-diverse
- * models — all verified against the live gateway catalog:
- *   1. Claude Opus 4.7  — Anthropic's flagship, careful Korean legal reasoning
- *   2. GPT-4o           — OpenAI flagship, most reliable structured output
- *   3. Grok 4.3         — xAI flagship, contrarian viewpoint (different
- *                          training data than the OpenAI/Anthropic axis)
- * Different families = different blind spots = better ensemble.
+ * The candidate roster for Mixture-of-Agents. FOUR viewpoint-diverse, mostly
+ * cost-efficient models so the candidate fan-out stays affordable; the
+ * aggregator (a single more expensive call) carries the heavy meta-reasoning.
+ *   1. Claude Sonnet 4.6   — Anthropic's balanced model. Excellent Korean
+ *                            legal nuance at ~1/5 of Opus cost.
+ *   2. Claude Haiku 4.5    — Fastest Anthropic. Different tier from Sonnet,
+ *                            so even though same family they catch different
+ *                            things.
+ *   3. xAI Grok 4.3        — Contrarian viewpoint. Different training axis
+ *                            from the OpenAI/Anthropic mainstream.
+ *   4. DeepSeek V4 Pro     — Surprisingly strong Korean (CJK-trained), very
+ *                            cheap, fully cross-vendor.
+ *
+ * The aggregator below is FULLY cross-vendor from this roster (OpenAI),
+ * which removes the self-bias risk of an Anthropic model judging itself.
  */
 export const MOA_ROSTER: readonly string[] = [
-  "anthropic/claude-opus-4.7",
-  "openai/gpt-4o",
+  "anthropic/claude-sonnet-4.6",
+  "anthropic/claude-haiku-4.5",
   "xai/grok-4.3",
+  "deepseek/deepseek-v4-pro",
 ];
 
-/** The aggregator model that synthesizes the candidate outputs. */
-export const MOA_AGGREGATOR_MODEL_ID = "anthropic/claude-opus-4.7";
+/**
+ * The aggregator model that synthesizes the candidate outputs.
+ * GPT-5.5 — different vendor from every candidate (Anthropic/xAI/DeepSeek),
+ * so the meta-judgment is genuinely neutral. Reliable JSON, strong Korean
+ * legal reasoning, sensible cost for the single-call aggregator role.
+ */
+export const MOA_AGGREGATOR_MODEL_ID = "openai/gpt-5.5";
 
 /** Selectable models. Order matters — the UI renders them in this order. */
 export const MODEL_OPTIONS: ModelOption[] = [
@@ -80,7 +94,7 @@ export const MODEL_OPTIONS: ModelOption[] = [
     family: "auto",
     tier: "premium",
     description:
-      "Auto-mixes Claude Opus 4.7 + GPT-4o + Grok 4.3 in parallel, then a Claude Opus aggregator synthesizes the best answer. ~4× cost, ~1.5× latency, highest quality.",
+      "4 diverse candidates (Sonnet 4.6 + Haiku 4.5 + Grok 4.3 + DeepSeek V4 Pro) run in parallel, then GPT-5.5 synthesizes a neutral cross-vendor judgment. Higher quality + lower self-bias than any single model.",
     korean: 5,
   },
   // ─── Anthropic Claude ───────────────────────────────────────────────
