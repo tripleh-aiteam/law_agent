@@ -76,23 +76,36 @@ export const MOA_ROSTER: readonly string[] = [
 
 /**
  * The aggregator model that synthesizes the candidate outputs.
- * FREE MODE: Groq's openai/gpt-oss-120b — a large open-weight OpenAI-style
- * model running on Groq's free tier. Strong meta-reasoning at $0.
- * Different family from every candidate, so no self-bias.
+ *
+ * HYBRID MODE: candidates fan out on free providers (Groq + Gemini), but
+ * the aggregator runs on Claude Sonnet 4.6 via the user's DIRECT
+ * Anthropic key — separate billing from the (currently empty) Vercel AI
+ * Gateway prepaid balance, so it draws from the user's $20 direct
+ * Anthropic credit instead.
+ *
+ * Why Sonnet 4.6 specifically:
+ *   - ~$0.03 per aggregator call → ~666 MoA queries from $20.
+ *   - Best Korean legal nuance / cost ratio in the Anthropic family.
+ *   - Different family from every free candidate (Llama / Qwen / Gemini),
+ *     so the meta-judgment is genuinely cross-vendor with no self-bias.
+ *
+ * If the user tops up the gateway and wants to swap back, set this to
+ * "openai/gpt-5.5" for the previous neutral-judge config, or
+ * "anthropic/claude-opus-4.7" for the original premium default.
  */
-export const MOA_AGGREGATOR_MODEL_ID = "groq/openai/gpt-oss-120b";
+export const MOA_AGGREGATOR_MODEL_ID = "anthropic/claude-sonnet-4.6";
 
 /** Selectable models. Order matters — the UI renders them in this order. */
 export const MODEL_OPTIONS: ModelOption[] = [
   // ─── Mixture-of-Agents (pinned to the top of the selector) ─────────
   {
     id: MOA_MODEL_ID,
-    displayName: "Mixture-of-Agents (FREE)",
+    displayName: "Mixture-of-Agents",
     family: "auto",
     tier: "premium",
     description:
-      "FREE MODE: 4 free-tier candidates (Llama 3.3 70B + Llama 4 Scout + Gemini 2.5 Flash + Qwen 3) run in parallel, then GPT-OSS 120B synthesizes. Routes via direct Groq + Google free APIs, NOT the paid gateway. $0/query.",
-    korean: 4,
+      "HYBRID: 4 FREE candidates (Llama 3.3 70B + Llama 4 Scout + Gemini 2.5 Flash + Qwen 3) fan out in parallel, then Claude Sonnet 4.6 synthesizes via your direct Anthropic key (~$0.03/query, ~666 queries from $20). Best Korean legal quality at near-free cost.",
+    korean: 5,
   },
   // ─── Groq (FREE TIER — direct API, bypasses paid gateway) ──────────
   // Groq's free tier serves these open-weight models at very high speed
