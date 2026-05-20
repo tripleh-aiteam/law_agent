@@ -136,6 +136,8 @@
   "chat": {
     "placeholder": "사건의 사실관계를 자세히 입력하세요. 당사자, 경위, 청구원인, 손해, 일시 등을 포함해 주세요.",
     "placeholderWithFiles": "첨부한 파일에 대해 질문하거나 추가 사실관계를 입력하세요.",
+    "questionHistory": "질문 기록",
+    "questionsCount": "건",
     "send": "전송",
     "attachFile": "파일 첨부",
     "startRecording": "음성 입력 시작",

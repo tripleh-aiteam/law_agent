@@ -69,3 +69,19 @@ export interface ClarifyingQuestion {
   question: string;
   why: string;
 }
+
+/**
+ * One entry in a case file's question history. Each time the user hits
+ * Send, the textarea contents (their question, NOT the combined narrative)
+ * are appended here so they can see their conversation history.
+ */
+export interface CaseQuestion {
+  id: string;
+  text: string;
+  /** ISO timestamp when the question was sent. */
+  createdAt: string;
+  /** AI model that processed this question (for the receipt). */
+  modelId?: string;
+  /** Filenames of attached files at the time of asking — shown for context. */
+  attachmentNames?: string[];
+}

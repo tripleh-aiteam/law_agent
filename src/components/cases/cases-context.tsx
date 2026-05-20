@@ -2,7 +2,7 @@
 
 import * as React from "react";
 
-import type { LegalElements, PrecedentMatch } from "@/lib/types";
+import type { CaseQuestion, LegalElements, PrecedentMatch } from "@/lib/types";
 
 export type CaseFile = {
   id: string;
@@ -13,6 +13,8 @@ export type CaseFile = {
   narrative: string;
   elements?: LegalElements;
   matches?: PrecedentMatch[];
+  /** Append-only log of each question the user has asked under this case. */
+  questions?: CaseQuestion[];
   createdAt: string;
   updatedAt: string;
 };
@@ -54,7 +56,7 @@ type CasesContextValue = {
   updateCase: (
     caseId: string,
     patch: Partial<
-      Pick<CaseFile, "narrative" | "elements" | "matches" | "name">
+      Pick<CaseFile, "narrative" | "elements" | "matches" | "name" | "questions">
     >,
   ) => void;
 };
@@ -363,7 +365,7 @@ export function CasesProvider({ children }: { children: React.ReactNode }) {
     (
       caseId: string,
       patch: Partial<
-        Pick<CaseFile, "narrative" | "elements" | "matches" | "name">
+        Pick<CaseFile, "narrative" | "elements" | "matches" | "name" | "questions">
       >,
     ) => {
       setState((s) => ({

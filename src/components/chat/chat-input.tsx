@@ -15,6 +15,7 @@ import { useCases } from "@/components/cases/cases-context";
 import { ActionChips } from "@/components/chat/action-chips";
 import { cn } from "@/lib/utils";
 import type {
+  CaseQuestion,
   ClarifyingQuestion,
   LegalElements,
   PrecedentMatch,
@@ -120,14 +121,14 @@ export function ChatInput() {
     setSpeechSupported(ctor !== null);
   }, []);
 
-  // Load narrative from selected case file.
+  // On case switch: clear the textarea + attachments. The textarea is for the
+  // NEXT question; past questions are visible in the history panel above.
+  // We deliberately do NOT auto-fill from currentCase.narrative because that
+  // could include extracted file text from old sessions (pre-Manus refactor).
   React.useEffect(() => {
-    if (currentCase) {
-      setValue(currentCase.narrative ?? "");
-    } else {
-      setValue("");
-    }
-  }, [currentCaseId, currentCase]);
+    setValue("");
+    setAttachments([]);
+  }, [currentCaseId]);
 
   // Autoresize.
   React.useEffect(() => {
@@ -357,6 +358,7 @@ export function ChatInput() {
     (value.trim().length >= 10 || hasReadyAttachments);
 
   const onSend = async () => {
+    const questionText = value.trim();
     const narrative = buildNarrative(value);
     if (!narrative) return;
 
@@ -367,7 +369,28 @@ export function ChatInput() {
       targetId = createCase(null);
       selectCase(targetId);
     }
-    updateCase(targetId, { narrative });
+
+    // Snapshot of attached filenames at ask-time (so the history shows them
+    // even after we clear the attachments after send).
+    const attachmentNames = attachments
+      .filter((a) => a.status === "ready")
+      .map((a) => a.filename);
+
+    // Append the user's question to the history BEFORE the API call so it's
+    // visible immediately. If the API fails we still keep the question in
+    // history — they can re-send.
+    const newQuestion: CaseQuestion = {
+      id: uid(),
+      text: questionText || (attachmentNames.length > 0 ? "(첨부파일 분석 요청)" : ""),
+      createdAt: new Date().toISOString(),
+      modelId: selectedModelId ?? undefined,
+      attachmentNames: attachmentNames.length > 0 ? attachmentNames : undefined,
+    };
+    const existingQuestions = currentCase?.questions ?? [];
+    updateCase(targetId, {
+      narrative,
+      questions: [...existingQuestions, newQuestion],
+    });
 
     setPhase("extracting");
     setError(null);
@@ -397,8 +420,10 @@ export function ChatInput() {
       if (!srRes.ok) throw new Error(`Search failed: ${srRes.status}`);
       const srData = (await srRes.json()) as SearchResponse;
       updateCase(targetId, { matches: srData.matches ?? [] });
-      // Clear attachments after successful send — they've been baked into
-      // the case's narrative. The user can attach fresh files for a follow-up.
+      // Clear textarea + attachments after successful send. The question
+      // is now preserved in the history panel above, and a new
+      // empty input is ready for a follow-up.
+      setValue("");
       setAttachments([]);
       setPhase("idle");
     } catch (err) {
@@ -416,9 +441,15 @@ export function ChatInput() {
   };
 
   const isBusy = phase !== "idle";
+  const questionHistory = currentCase?.questions ?? [];
 
   return (
     <div className="space-y-4">
+      {/* Question history — appears above the input when the case has
+          past questions. Each is numbered (Q1, Q2, ...) and bolded so
+          the user can quickly recall what they've asked. */}
+      {questionHistory.length > 0 && <QuestionHistoryPanel questions={questionHistory} />}
+
       <div
         onDragOver={(e) => {
           e.preventDefault();
@@ -596,6 +627,53 @@ export function ChatInput() {
       )}
 
       <ActionChips onSelect={replaceWithPrefix} />
+    </div>
+  );
+}
+
+/**
+ * Question history — numbered, bolded list of every question the user has
+ * sent under the current case file. Helps them remember context across
+ * follow-up questions. Persisted in case.questions in localStorage.
+ */
+function QuestionHistoryPanel({
+  questions,
+}: {
+  questions: CaseQuestion[];
+}): React.ReactElement {
+  const t = useTranslations("chat");
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="mb-2 flex items-center justify-between">
+        <h3 className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+          {t("questionHistory")}
+        </h3>
+        <span className="text-[11px] text-slate-400">
+          {questions.length} {t("questionsCount")}
+        </span>
+      </div>
+      <ol className="space-y-2.5">
+        {questions.map((q, i) => (
+          <li
+            key={q.id}
+            className="flex gap-2.5 rounded-lg bg-slate-50/60 px-3 py-2"
+          >
+            <span className="shrink-0 select-none rounded bg-slate-900 px-1.5 py-0.5 text-[11px] font-bold text-white">
+              Q{i + 1}
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="text-[14px] font-semibold leading-snug text-slate-900">
+                {q.text}
+              </p>
+              {q.attachmentNames && q.attachmentNames.length > 0 && (
+                <p className="mt-1 truncate text-[11px] text-slate-500">
+                  📎 {q.attachmentNames.join(", ")}
+                </p>
+              )}
+            </div>
+          </li>
+        ))}
+      </ol>
     </div>
   );
 }
