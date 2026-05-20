@@ -32,12 +32,19 @@ const FAMILY_GLYPH: Record<
   google: { letter: "♊", classes: "bg-blue-100 text-blue-700" },
 };
 
-function FamilyGlyph({ family }: { family: ModelFamily }) {
+function FamilyGlyph({
+  family,
+  size = "sm",
+}: {
+  family: ModelFamily;
+  size?: "sm" | "md";
+}) {
   const g = FAMILY_GLYPH[family];
   return (
     <span
       className={cn(
-        "flex h-5 w-5 shrink-0 items-center justify-center rounded text-[10px] font-bold",
+        "flex shrink-0 items-center justify-center rounded font-bold",
+        size === "md" ? "h-6 w-6 text-sm" : "h-5 w-5 text-[10px]",
         g.classes,
       )}
       aria-hidden
@@ -199,9 +206,9 @@ export function ModelSelector(): React.ReactElement {
       <div className="min-h-0 flex-1 overflow-y-auto py-1">
         {grouped.map(([family, options]) => (
           <div key={family} className="py-1">
-            <div className="flex items-center gap-1.5 px-3 py-1">
-              <FamilyGlyph family={family} />
-              <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+            <div className="flex items-center gap-2 px-3 py-1.5">
+              <FamilyGlyph family={family} size="md" />
+              <span className="text-base font-bold tracking-tight text-slate-900">
                 {FAMILY_LABELS[family][locale]}
               </span>
             </div>
