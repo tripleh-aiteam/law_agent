@@ -3,8 +3,17 @@
  * Model Selector dropdown. Every model is referenced as a Vercel AI Gateway
  * provider/model string so calls flow through the Pro AI Gateway credits.
  *
+ * IDs MUST match the canonical form returned by
+ *   GET https://ai-gateway.vercel.sh/v1/models
+ *
+ * Anthropic / Google / xAI / DeepSeek / OpenAI all use DOT-separated
+ * versions (e.g. `claude-opus-4.7`, NOT `claude-opus-4-7`). The gateway
+ * silently aliases the dash form for the most common Anthropic IDs but
+ * NOT for xAI — that's why our previous `xai/grok-4` failed with
+ * "Model 'xai/grok-4' not found". The flagship is `xai/grok-4.3`.
+ *
  * Each entry includes:
- *   - id          : gateway model ID (e.g. "anthropic/claude-opus-4-7")
+ *   - id          : gateway model ID (verified against the live catalog)
  *   - displayName : short human label shown in the UI
  *   - family      : brand grouping (used to render section headers)
  *   - tier        : "premium" | "balanced" | "fast"  — speed/cost shorthand
@@ -12,7 +21,6 @@
  *   - korean      : informal note about Korean legal text quality (0–5)
  *   - experimental: optional flag for models known to occasionally return
  *                   malformed JSON on our complex structured-output schema
- *                   (we still expose them, but mark them so users know)
  */
 
 export type ModelFamily =
@@ -23,7 +31,6 @@ export type ModelFamily =
   | "xai"
   | "deepseek"
   | "meta"
-  | "moonshot"
   | "mistral";
 
 export type ModelTier = "premium" | "balanced" | "fast";
@@ -47,18 +54,22 @@ export interface ModelOption {
 export const MOA_MODEL_ID = "auto/mixture-of-agents";
 
 /**
- * The candidate roster for Mixture-of-Agents. Defined here (client-safe)
- * so the UI can seed its progress visualization before any server event
- * arrives, AND so src/lib/moa.ts uses the same canonical list.
+ * The candidate roster for Mixture-of-Agents. THREE strong, viewpoint-diverse
+ * models — all verified against the live gateway catalog:
+ *   1. Claude Opus 4.7  — Anthropic's flagship, careful Korean legal reasoning
+ *   2. GPT-4o           — OpenAI flagship, most reliable structured output
+ *   3. Grok 4.3         — xAI flagship, contrarian viewpoint (different
+ *                          training data than the OpenAI/Anthropic axis)
+ * Different families = different blind spots = better ensemble.
  */
 export const MOA_ROSTER: readonly string[] = [
-  "anthropic/claude-opus-4-7",
+  "anthropic/claude-opus-4.7",
   "openai/gpt-4o",
-  "xai/grok-4",
+  "xai/grok-4.3",
 ];
 
 /** The aggregator model that synthesizes the candidate outputs. */
-export const MOA_AGGREGATOR_MODEL_ID = "anthropic/claude-opus-4-7";
+export const MOA_AGGREGATOR_MODEL_ID = "anthropic/claude-opus-4.7";
 
 /** Selectable models. Order matters — the UI renders them in this order. */
 export const MODEL_OPTIONS: ModelOption[] = [
@@ -69,12 +80,12 @@ export const MODEL_OPTIONS: ModelOption[] = [
     family: "auto",
     tier: "premium",
     description:
-      "Auto-mixes Claude Opus 4.7 + GPT-4o + Grok 4 in parallel, then a Claude Opus aggregator synthesizes the best answer. ~4× cost, ~1.5× latency, highest quality.",
+      "Auto-mixes Claude Opus 4.7 + GPT-4o + Grok 4.3 in parallel, then a Claude Opus aggregator synthesizes the best answer. ~4× cost, ~1.5× latency, highest quality.",
     korean: 5,
   },
   // ─── Anthropic Claude ───────────────────────────────────────────────
   {
-    id: "anthropic/claude-opus-4-7",
+    id: "anthropic/claude-opus-4.7",
     displayName: "Claude Opus 4.7",
     family: "anthropic",
     tier: "premium",
@@ -83,7 +94,7 @@ export const MODEL_OPTIONS: ModelOption[] = [
     korean: 5,
   },
   {
-    id: "anthropic/claude-sonnet-4-6",
+    id: "anthropic/claude-sonnet-4.6",
     displayName: "Claude Sonnet 4.6",
     family: "anthropic",
     tier: "balanced",
@@ -92,7 +103,7 @@ export const MODEL_OPTIONS: ModelOption[] = [
     korean: 5,
   },
   {
-    id: "anthropic/claude-haiku-4-5",
+    id: "anthropic/claude-haiku-4.5",
     displayName: "Claude Haiku 4.5",
     family: "anthropic",
     tier: "fast",
@@ -101,32 +112,71 @@ export const MODEL_OPTIONS: ModelOption[] = [
     korean: 4,
   },
   {
-    id: "anthropic/claude-opus-4-6",
+    id: "anthropic/claude-opus-4.6",
     displayName: "Claude Opus 4.6",
     family: "anthropic",
     tier: "premium",
-    description:
-      "Prior generation Opus. Kept for A/B comparisons against 4.7.",
+    description: "Prior-generation Opus. Useful for A/B against 4.7.",
     korean: 5,
   },
   {
-    id: "anthropic/claude-sonnet-4-5",
+    id: "anthropic/claude-sonnet-4.5",
     displayName: "Claude Sonnet 4.5",
     family: "anthropic",
     tier: "balanced",
-    description:
-      "Prior generation Sonnet. Kept for A/B comparisons against 4.6.",
+    description: "Prior-generation Sonnet. Useful for A/B against 4.6.",
     korean: 5,
   },
 
   // ─── OpenAI ─────────────────────────────────────────────────────────
+  {
+    id: "openai/gpt-5.5",
+    displayName: "GPT-5.5",
+    family: "openai",
+    tier: "premium",
+    description:
+      "OpenAI's flagship. Best overall reasoning + structured output reliability.",
+    korean: 5,
+  },
+  {
+    id: "openai/gpt-5.5-pro",
+    displayName: "GPT-5.5 Pro",
+    family: "openai",
+    tier: "premium",
+    description: "Higher-compute GPT-5.5 variant for hardest tasks.",
+    korean: 5,
+  },
+  {
+    id: "openai/gpt-5.4",
+    displayName: "GPT-5.4",
+    family: "openai",
+    tier: "premium",
+    description: "Prior flagship — still extremely capable, slightly cheaper than 5.5.",
+    korean: 5,
+  },
+  {
+    id: "openai/gpt-5.4-mini",
+    displayName: "GPT-5.4 mini",
+    family: "openai",
+    tier: "balanced",
+    description: "Mid-tier GPT-5.4. Solid Korean, much cheaper than full 5.4.",
+    korean: 4,
+  },
+  {
+    id: "openai/gpt-5.4-nano",
+    displayName: "GPT-5.4 nano",
+    family: "openai",
+    tier: "fast",
+    description: "Cheapest GPT-5.4 variant. Fast, good for short queries.",
+    korean: 4,
+  },
   {
     id: "openai/gpt-4o",
     displayName: "GPT-4o",
     family: "openai",
     tier: "premium",
     description:
-      "OpenAI's flagship multimodal. Strong on Korean legal terminology; reliable structured outputs.",
+      "Reliable older flagship. Excellent structured output, strong Korean.",
     korean: 5,
   },
   {
@@ -134,8 +184,7 @@ export const MODEL_OPTIONS: ModelOption[] = [
     displayName: "GPT-4o mini",
     family: "openai",
     tier: "fast",
-    description:
-      "Cheap, fast OpenAI. Lower legal nuance than full GPT-4o but ~15× cheaper.",
+    description: "Cheap, fast OpenAI. Best price/quality for high-volume use.",
     korean: 4,
   },
   {
@@ -144,7 +193,7 @@ export const MODEL_OPTIONS: ModelOption[] = [
     family: "openai",
     tier: "premium",
     description:
-      "OpenAI's reasoning flagship. Best for multi-step legal analysis; higher latency.",
+      "OpenAI's reasoning model. Best for multi-step legal analysis; higher latency.",
     korean: 4,
   },
   {
@@ -156,42 +205,81 @@ export const MODEL_OPTIONS: ModelOption[] = [
     korean: 4,
   },
   {
-    id: "openai/o1",
-    displayName: "o1",
+    id: "openai/o3-pro",
+    displayName: "o3-pro",
     family: "openai",
     tier: "premium",
-    description: "Original chain-of-thought reasoning model.",
+    description: "Heavyweight reasoning. Slow but very thorough on complex cases.",
+    korean: 4,
+  },
+  {
+    id: "openai/o4-mini",
+    displayName: "o4-mini",
+    family: "openai",
+    tier: "balanced",
+    description: "Next-gen reasoning, cheaper variant.",
     korean: 4,
   },
 
   // ─── xAI Grok ───────────────────────────────────────────────────────
   {
-    id: "xai/grok-4",
-    displayName: "Grok 4",
+    id: "xai/grok-4.3",
+    displayName: "Grok 4.3",
     family: "xai",
     tier: "premium",
     description:
-      "xAI's flagship. Strong tool-use and structured output; weaker on Korean nuance than Claude/GPT but useful for diverse-viewpoint ensembles.",
+      "xAI's current flagship. Strong tool-use and structured output; weaker Korean nuance than Claude/GPT but useful for diverse-viewpoint ensembles.",
     korean: 3,
   },
   {
-    id: "xai/grok-4-heavy",
-    displayName: "Grok 4 Heavy",
+    id: "xai/grok-4.20-reasoning",
+    displayName: "Grok 4.20 (reasoning)",
     family: "xai",
     tier: "premium",
-    description:
-      "Higher-compute Grok 4 variant — slower but deeper reasoning.",
+    description: "Reasoning variant of Grok 4.20 — deeper analysis, slower.",
+    korean: 3,
+  },
+  {
+    id: "xai/grok-4.20-non-reasoning",
+    displayName: "Grok 4.20",
+    family: "xai",
+    tier: "balanced",
+    description: "Non-reasoning Grok 4.20 — faster, lower cost.",
+    korean: 3,
+  },
+  {
+    id: "xai/grok-4.1-fast-reasoning",
+    displayName: "Grok 4.1 Fast (reasoning)",
+    family: "xai",
+    tier: "fast",
+    description: "Cheaper xAI option with reasoning enabled.",
     korean: 3,
   },
 
   // ─── DeepSeek ───────────────────────────────────────────────────────
   {
+    id: "deepseek/deepseek-v4-pro",
+    displayName: "DeepSeek V4 Pro",
+    family: "deepseek",
+    tier: "premium",
+    description:
+      "DeepSeek's flagship. Strong Korean handling at very low cost.",
+    korean: 4,
+  },
+  {
+    id: "deepseek/deepseek-v3.2",
+    displayName: "DeepSeek V3.2",
+    family: "deepseek",
+    tier: "balanced",
+    description: "Newer mid-tier DeepSeek. Solid balance of cost and quality.",
+    korean: 4,
+  },
+  {
     id: "deepseek/deepseek-v3",
     displayName: "DeepSeek V3",
     family: "deepseek",
     tier: "balanced",
-    description:
-      "Strong open-weight model. Solid Korean, very cost-efficient.",
+    description: "Open-weight V3. Very cost-efficient.",
     korean: 4,
   },
   {
@@ -199,19 +287,36 @@ export const MODEL_OPTIONS: ModelOption[] = [
     displayName: "DeepSeek R1",
     family: "deepseek",
     tier: "premium",
-    description:
-      "DeepSeek's reasoning model. Best for complex analytical tasks.",
+    description: "DeepSeek's reasoning model. Strong analytical depth.",
     korean: 4,
   },
 
-  // ─── Google Gemini (re-added with experimental flag) ────────────────
+  // ─── Google Gemini (experimental on JSON-schema mode) ───────────────
+  {
+    id: "google/gemini-3.1-pro-preview",
+    displayName: "Gemini 3.1 Pro Preview",
+    family: "google",
+    tier: "premium",
+    description:
+      "Google's newest flagship preview. Excellent long-context. JSON-schema mode is sometimes flaky — we'll retry on failure.",
+    korean: 4,
+    experimental: true,
+  },
+  {
+    id: "google/gemini-3-pro-preview",
+    displayName: "Gemini 3 Pro Preview",
+    family: "google",
+    tier: "premium",
+    description: "Gemini 3 flagship preview. Strong on Korean long-context.",
+    korean: 4,
+    experimental: true,
+  },
   {
     id: "google/gemini-2.5-pro",
     displayName: "Gemini 2.5 Pro",
     family: "google",
     tier: "premium",
-    description:
-      "Google's flagship. Excellent at long-context Korean documents. JSON-schema mode is sometimes flaky — we'll retry on failure.",
+    description: "Stable Gemini flagship. Long-context Korean documents.",
     korean: 4,
     experimental: true,
   },
@@ -221,62 +326,101 @@ export const MODEL_OPTIONS: ModelOption[] = [
     family: "google",
     tier: "fast",
     description:
-      "Fast Gemini. Good for quick summaries; structured-output success rate ~70% on our schema.",
+      "Fast Gemini. Good for quick summaries; structured output ~70% reliable.",
+    korean: 4,
+    experimental: true,
+  },
+  {
+    id: "google/gemini-3.1-flash-lite",
+    displayName: "Gemini 3.1 Flash Lite",
+    family: "google",
+    tier: "fast",
+    description: "Cheapest current Gemini. Useful for high-volume light tasks.",
     korean: 4,
     experimental: true,
   },
 
   // ─── Meta Llama ─────────────────────────────────────────────────────
   {
-    id: "meta/llama-4-scout",
-    displayName: "Llama 4 Scout",
-    family: "meta",
-    tier: "fast",
-    description:
-      "Meta's small Llama 4. Multilingual; fast and inexpensive.",
-    korean: 3,
-  },
-  {
     id: "meta/llama-4-maverick",
     displayName: "Llama 4 Maverick",
     family: "meta",
     tier: "balanced",
-    description:
-      "Larger Llama 4 variant. Better reasoning at modest cost.",
+    description: "Larger Llama 4 variant. Better reasoning at modest cost.",
     korean: 3,
   },
-
-  // ─── Moonshot Kimi ──────────────────────────────────────────────────
   {
-    id: "moonshot/kimi-k2",
-    displayName: "Kimi K2",
-    family: "moonshot",
+    id: "meta/llama-4-scout",
+    displayName: "Llama 4 Scout",
+    family: "meta",
+    tier: "fast",
+    description: "Meta's small Llama 4. Multilingual; fast and inexpensive.",
+    korean: 3,
+  },
+  {
+    id: "meta/llama-3.3-70b",
+    displayName: "Llama 3.3 70B",
+    family: "meta",
     tier: "balanced",
-    description:
-      "Moonshot's flagship. Excellent long-context capabilities; useful for full-judgment PDFs.",
+    description: "Stable previous-gen Meta. Reliable, well-tested.",
     korean: 3,
   },
 
   // ─── Mistral ────────────────────────────────────────────────────────
   {
-    id: "mistral/mistral-large",
-    displayName: "Mistral Large",
+    id: "mistral/mistral-large-3",
+    displayName: "Mistral Large 3",
     family: "mistral",
     tier: "balanced",
     description:
       "Mistral's flagship. Decent multilingual reasoning; weaker Korean than Claude/GPT.",
     korean: 3,
   },
+  {
+    id: "mistral/mistral-medium-3.5",
+    displayName: "Mistral Medium 3.5",
+    family: "mistral",
+    tier: "balanced",
+    description: "Mid-size Mistral. Good cost balance.",
+    korean: 3,
+  },
 ];
 
 /** Default model — used when the user hasn't selected one yet. */
-export const DEFAULT_MODEL_ID = "anthropic/claude-sonnet-4-6";
+export const DEFAULT_MODEL_ID = "anthropic/claude-sonnet-4.6";
 
 const MODEL_BY_ID = new Map(MODEL_OPTIONS.map((m) => [m.id, m]));
 
+/**
+ * Back-compat: older localStorage payloads may carry dash-style IDs
+ * (`anthropic/claude-sonnet-4-6`) from before we switched to the canonical
+ * dot form. Map them onto the current canonical IDs so users don't lose
+ * their model selection across deploys.
+ */
+const LEGACY_ID_ALIASES: Record<string, string> = {
+  "anthropic/claude-opus-4-7": "anthropic/claude-opus-4.7",
+  "anthropic/claude-sonnet-4-6": "anthropic/claude-sonnet-4.6",
+  "anthropic/claude-haiku-4-5": "anthropic/claude-haiku-4.5",
+  "anthropic/claude-opus-4-6": "anthropic/claude-opus-4.6",
+  "anthropic/claude-sonnet-4-5": "anthropic/claude-sonnet-4.5",
+  "xai/grok-4": "xai/grok-4.3",
+  "xai/grok-4-heavy": "xai/grok-4.20-reasoning",
+  "deepseek/deepseek-v3": "deepseek/deepseek-v3",
+  "deepseek/deepseek-r1": "deepseek/deepseek-r1",
+  "mistral/mistral-large": "mistral/mistral-large-3",
+  "moonshot/kimi-k2": "anthropic/claude-sonnet-4.6", // dropped from registry
+};
+
+function canonicalizeId(id: string | null | undefined): string | null {
+  if (!id) return null;
+  return LEGACY_ID_ALIASES[id] ?? id;
+}
+
 /** Resolve a model ID to its registry entry. Falls back to the default. */
 export function resolveModel(id: string | null | undefined): ModelOption {
-  if (id && MODEL_BY_ID.has(id)) return MODEL_BY_ID.get(id)!;
+  const canonical = canonicalizeId(id);
+  if (canonical && MODEL_BY_ID.has(canonical))
+    return MODEL_BY_ID.get(canonical)!;
   return MODEL_BY_ID.get(DEFAULT_MODEL_ID)!;
 }
 
@@ -289,7 +433,8 @@ export function resolveModel(id: string | null | undefined): ModelOption {
  */
 export function safeModelId(input: string | null | undefined): string {
   if (input === MOA_MODEL_ID) return DEFAULT_MODEL_ID;
-  if (input && MODEL_BY_ID.has(input)) return input;
+  const canonical = canonicalizeId(input);
+  if (canonical && MODEL_BY_ID.has(canonical)) return canonical;
   return DEFAULT_MODEL_ID;
 }
 
@@ -307,7 +452,6 @@ export const FAMILY_LABELS: Record<ModelFamily, { ko: string; en: string }> = {
   google: { ko: "Google Gemini", en: "Google Gemini" },
   deepseek: { ko: "DeepSeek", en: "DeepSeek" },
   meta: { ko: "Meta Llama", en: "Meta Llama" },
-  moonshot: { ko: "Moonshot Kimi", en: "Moonshot Kimi" },
   mistral: { ko: "Mistral", en: "Mistral" },
 };
 

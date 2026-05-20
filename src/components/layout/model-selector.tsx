@@ -36,7 +36,6 @@ const FAMILY_GLYPH: Record<
   xai: { letter: "X", classes: "bg-slate-900 text-white" },
   deepseek: { letter: "D", classes: "bg-cyan-100 text-cyan-700" },
   meta: { letter: "M", classes: "bg-sky-100 text-sky-700" },
-  moonshot: { letter: "K", classes: "bg-fuchsia-100 text-fuchsia-700" },
   mistral: { letter: "Ⓜ", classes: "bg-amber-100 text-amber-700" },
 };
 
@@ -91,7 +90,6 @@ function shortLabel(opt: ModelOption): string {
   const prefixes: Array<{ family: ModelFamily; prefix: string }> = [
     { family: "anthropic", prefix: "Claude " },
     { family: "meta", prefix: "Llama " },
-    { family: "moonshot", prefix: "Kimi " },
     { family: "mistral", prefix: "Mistral " },
     { family: "google", prefix: "Gemini " },
     { family: "xai", prefix: "Grok " },

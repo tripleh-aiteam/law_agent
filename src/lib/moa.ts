@@ -144,6 +144,25 @@ function anySignal(signals: AbortSignal[]): AbortSignal {
   return ctl.signal;
 }
 
+/**
+ * True when the error message indicates the model returned content the
+ * AI SDK couldn't fit into the schema (markdown-wrapped JSON, preamble,
+ * truncated output). These are retry-worthy — a tighter system prompt
+ * usually fixes them on attempt #2.
+ */
+function isParseFailure(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  const m = err.message.toLowerCase();
+  return (
+    m.includes("could not parse") ||
+    m.includes("did not match schema") ||
+    m.includes("no object generated") ||
+    m.includes("validation failed")
+  );
+}
+
+const STRICT_JSON_SUFFIX = `\n\nIMPORTANT: Output ONLY valid JSON matching the schema. No markdown code fences. No preamble. No commentary. The very first character must be { and the very last must be }.`;
+
 async function runCandidate(
   modelId: string,
   userPrompt: string,
@@ -153,15 +172,35 @@ async function runCandidate(
   const abortSignal = clientSignal
     ? anySignal([clientSignal, AbortSignal.timeout(CANDIDATE_TIMEOUT_MS)])
     : AbortSignal.timeout(CANDIDATE_TIMEOUT_MS);
-  const result = await generateObject({
-    model,
-    schema: ResponseSchema,
-    system: CANDIDATE_SYSTEM,
-    prompt: userPrompt,
-    abortSignal,
-    maxOutputTokens: 2048,
-  });
-  return result.object as Candidate;
+
+  const callOnce = (systemPrompt: string) =>
+    generateObject({
+      model,
+      schema: ResponseSchema,
+      system: systemPrompt,
+      prompt: userPrompt,
+      abortSignal,
+      // 4096 (up from 2048) — Claude/Opus on long Korean inputs occasionally
+      // truncated mid-JSON at 2048, which surfaced as "could not parse".
+      maxOutputTokens: 4096,
+      temperature: 0,
+    });
+
+  try {
+    const result = await callOnce(CANDIDATE_SYSTEM);
+    return result.object as Candidate;
+  } catch (err) {
+    // Retry once with a stricter JSON-only instruction. We do NOT retry
+    // on AbortError (user pressed Stop) or on network/auth errors.
+    if (
+      isParseFailure(err) &&
+      !(err instanceof DOMException && err.name === "AbortError")
+    ) {
+      const result = await callOnce(CANDIDATE_SYSTEM + STRICT_JSON_SUFFIX);
+      return result.object as Candidate;
+    }
+    throw err;
+  }
 }
 
 async function runAggregator(
@@ -193,15 +232,32 @@ async function runAggregator(
     "",
     "Synthesize ONE final extraction per the rules.",
   ].join("\n");
-  const result = await generateObject({
-    model,
-    schema: ResponseSchema,
-    system: AGGREGATOR_SYSTEM,
-    prompt: userPrompt,
-    abortSignal,
-    maxOutputTokens: 2048,
-  });
-  return result.object as Candidate;
+  const callOnce = (systemPrompt: string) =>
+    generateObject({
+      model,
+      schema: ResponseSchema,
+      system: systemPrompt,
+      prompt: userPrompt,
+      abortSignal,
+      // 4096 — same rationale as candidates; the aggregator emits MORE
+      // text than a single candidate because it consolidates 3 sources.
+      maxOutputTokens: 4096,
+      temperature: 0,
+    });
+
+  try {
+    const result = await callOnce(AGGREGATOR_SYSTEM);
+    return result.object as Candidate;
+  } catch (err) {
+    if (
+      isParseFailure(err) &&
+      !(err instanceof DOMException && err.name === "AbortError")
+    ) {
+      const result = await callOnce(AGGREGATOR_SYSTEM + STRICT_JSON_SUFFIX);
+      return result.object as Candidate;
+    }
+    throw err;
+  }
 }
 
 /**
