@@ -1,9 +1,13 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { extractLegalElements } from "@/lib/extractor";
+import { isMoaModelId } from "@/lib/models";
+import { moaExtract } from "@/lib/moa";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+// MoA fans out to 3 models + 1 aggregator. The slowest path can take ~75s,
+// so we bump maxDuration above the previous 60s to give MoA headroom.
+export const maxDuration = 120;
 
 const BodySchema = z.object({
   narrative: z.string().min(10, "narrative must be at least 10 characters"),
@@ -29,6 +33,23 @@ export async function POST(req: Request): Promise<Response> {
   }
 
   try {
+    // Branch: Mixture-of-Agents path vs. single-model path.
+    // MoA fans out to 3 strong models + an aggregator; the single-model
+    // path is the standard extractLegalElements call.
+    if (isMoaModelId(parsed.data.model)) {
+      const result = await moaExtract(
+        parsed.data.narrative,
+        parsed.data.locale,
+        req.signal,
+      );
+      return NextResponse.json({
+        elements: result.elements,
+        summary: result.summary,
+        clarifyingQuestions: result.clarifyingQuestions,
+        candidates: result.candidates,
+      });
+    }
+
     const { elements, summary, clarifyingQuestions } = await extractLegalElements(
       parsed.data.narrative,
       parsed.data.locale,

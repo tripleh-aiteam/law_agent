@@ -123,4 +123,13 @@ export interface CaseTurn {
   matches?: PrecedentMatch[];
   /** Human-readable error message when status === "error". */
   error?: string;
+  /**
+   * Audit trail from Mixture-of-Agents mode — one entry per fan-out model
+   * plus an optional aggregator entry. Undefined for single-model turns.
+   */
+  moaCandidates?: Array<{
+    modelId: string;
+    status: "ok" | "failed";
+    error?: string;
+  }>;
 }

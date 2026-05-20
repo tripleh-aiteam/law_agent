@@ -4,6 +4,7 @@ import * as React from "react";
 import { useLocale, useTranslations } from "next-intl";
 import {
   AlertTriangle,
+  CheckCircle2,
   ChevronDown,
   ChevronUp,
   Loader2,
@@ -206,6 +207,11 @@ function AnswerComplete({ turn }: { turn: CaseTurn }): React.ReactElement {
 
   return (
     <div className="space-y-3">
+      {/* MoA audit badge — only present when Mixture-of-Agents was used. */}
+      {turn.moaCandidates && turn.moaCandidates.length > 0 && (
+        <MoaAuditBadge candidates={turn.moaCandidates} />
+      )}
+
       {/* Summary card — always shown for completed turns. */}
       {turn.summary && (
         <div className="rounded-2xl rounded-tl-md border border-slate-200 bg-white px-4 py-3.5 text-[14px] leading-relaxed text-slate-800 shadow-sm">
@@ -273,6 +279,74 @@ function AnswerComplete({ turn }: { turn: CaseTurn }): React.ReactElement {
             </div>
           )}
         </div>
+      )}
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* MoA audit badge                                                             */
+/* -------------------------------------------------------------------------- */
+
+function MoaAuditBadge({
+  candidates,
+}: {
+  candidates: NonNullable<CaseTurn["moaCandidates"]>;
+}): React.ReactElement {
+  const t = useTranslations("chat");
+  const [open, setOpen] = React.useState(false);
+  const okCount = candidates.filter((c) => c.status === "ok").length;
+  const total = candidates.length;
+  return (
+    <div className="rounded-2xl rounded-tl-md border border-indigo-200 bg-gradient-to-r from-indigo-50 to-violet-50 px-3.5 py-2.5 text-[12px] text-indigo-900 shadow-sm">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-2"
+      >
+        <Sparkles className="h-3.5 w-3.5 text-indigo-500" aria-hidden />
+        <span className="font-semibold">
+          {t("moaBadge", { ok: okCount, total })}
+        </span>
+        <ChevronDown
+          className={cn(
+            "ml-auto h-3.5 w-3.5 text-indigo-500 transition-transform",
+            open && "rotate-180",
+          )}
+          aria-hidden
+        />
+      </button>
+      {open && (
+        <ul className="mt-2 space-y-1 border-t border-indigo-200/60 pt-2">
+          {candidates.map((c) => (
+            <li
+              key={c.modelId + (c.error ?? "")}
+              className="flex items-start gap-2 text-[11px]"
+            >
+              {c.status === "ok" ? (
+                <CheckCircle2
+                  className="mt-0.5 h-3 w-3 shrink-0 text-emerald-600"
+                  aria-hidden
+                />
+              ) : (
+                <XCircle
+                  className="mt-0.5 h-3 w-3 shrink-0 text-rose-600"
+                  aria-hidden
+                />
+              )}
+              <div className="min-w-0 flex-1">
+                <div className="font-mono text-[11px] text-indigo-900">
+                  {c.modelId}
+                </div>
+                {c.error && (
+                  <div className="truncate text-[10px] text-rose-700">
+                    {c.error}
+                  </div>
+                )}
+              </div>
+            </li>
+          ))}
+        </ul>
       )}
     </div>
   );

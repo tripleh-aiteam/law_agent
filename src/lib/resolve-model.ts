@@ -49,6 +49,12 @@ export function resolveModelForUse(
     // Unknown ID — let the gateway figure it out (or fail loudly).
     return modelId;
   }
+  // The Mixture-of-Agents pseudo-model is NOT a real upstream model — it's
+  // a higher-level wrapper handled inside src/lib/moa.ts. Any direct AI SDK
+  // caller (rerank, summarize, etc.) that received MoA should fall back to
+  // its module default instead.
+  if (opt.family === "auto") return undefined;
+
   const modelName = modelNameFromId(opt.id);
 
   // Prefer gateway routing — more reliable JSON-schema normalization.
@@ -66,6 +72,11 @@ export function resolveModelForUse(
   if (opt.family === "google" && hasEnv("GOOGLE_GENERATIVE_AI_API_KEY")) {
     return google(modelName);
   }
+  // xAI / DeepSeek / Meta / Moonshot / Mistral / auto are only reachable
+  // via the Vercel AI Gateway — we don't ship direct providers for them
+  // because that would require shipping their SDKs + per-provider keys.
+  // If the user picks one without AI_GATEWAY_API_KEY set, returning the
+  // gateway-form id below produces a clean "no API key" error downstream.
 
   // No keys configured at all — return the gateway string as a last resort
   // (will fail with a clear "no API key" error downstream).

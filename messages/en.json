@@ -157,7 +157,8 @@
     "viewDetails": "View details",
     "hideDetails": "Hide details",
     "emptyThread": "Pick a case from the sidebar or type a question below.",
-    "noMatchesForTurn": "No similar precedents for this question."
+    "noMatchesForTurn": "No similar precedents for this question.",
+    "moaBadge": "Mixture-of-Agents · {ok}/{total} models agreed"
   },
   "chips": {
     "summarize": {

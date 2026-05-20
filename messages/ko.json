@@ -157,7 +157,8 @@
     "viewDetails": "자세히 보기",
     "hideDetails": "접기",
     "emptyThread": "왼쪽에서 사건을 선택하거나 아래에 질문을 입력하세요.",
-    "noMatchesForTurn": "이 질문에서는 유사한 판례를 찾지 못했습니다."
+    "noMatchesForTurn": "이 질문에서는 유사한 판례를 찾지 못했습니다.",
+    "moaBadge": "Mixture-of-Agents · {ok}/{total} 모델 합의"
   },
   "chips": {
     "summarize": {

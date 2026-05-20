@@ -23,8 +23,11 @@ export type ExtractedFile = {
 const HWP_UNSUPPORTED_WARNING =
   "한컴오피스(HWP) 파일은 v1에서 지원하지 않습니다. PDF로 변환 후 다시 업로드해 주세요. / HWP files are not supported in v1; please convert to PDF and re-upload.";
 
-const SCANNED_PDF_WARNING =
-  "PDF appears to be image-based (scanned). OCR was not performed in v1 — please paste the text manually.";
+const SCANNED_PDF_WARNING_OCR_TRIED =
+  "PDF appeared to be image-based (scanned). OCR was attempted via Claude vision — text below is OCR output and may contain errors.";
+
+const SCANNED_PDF_WARNING_OCR_FAILED =
+  "PDF appears to be image-based (scanned) and OCR failed. Please re-scan with selectable text or paste the content manually.";
 
 /** Strip ASCII control characters from filenames so they're safe to log. */
 function sanitizeFilename(name: string): string {
@@ -67,15 +70,37 @@ async function extractPdf(buffer: Buffer): Promise<{ text: string; pages: number
   const pdfParse: (b: Buffer) => Promise<{ text: string; numpages: number }> =
     typeof mod === "function" ? mod : mod.default;
 
+  // Tiny ratio of (extracted chars per page). Below this we treat the PDF
+  // as effectively scanned and trigger vision OCR. 50 chars/page is well
+  // below any meaningful prose density (a court ruling averages > 800/page).
+  const SCANNED_THRESHOLD_CHARS_PER_PAGE = 50;
+
   try {
     const result = await pdfParse(buffer);
-    const text = (result.text ?? "").trim();
+    const rawText = result.text ?? "";
+    const trimmed = rawText.trim();
     const pages = result.numpages ?? 0;
-    if (pages > 0 && text.length < 50) {
-      warnings.push(SCANNED_PDF_WARNING);
+    const isScanned =
+      pages > 0 && trimmed.length < SCANNED_THRESHOLD_CHARS_PER_PAGE * pages;
+
+    if (!isScanned) {
+      return { text: rawText, pages, warnings };
     }
-    // pdf-parse already joins pages; normalize whitespace minimally.
-    return { text: result.text ?? "", pages, warnings };
+
+    // OCR fallback — dynamic import so the AI SDK isn't loaded on every
+    // upload (only when we actually need it).
+    const { ocrPdfWithVision } = await import("./ocr");
+    const ocr = await ocrPdfWithVision(buffer, pages);
+    if (ocr.text) {
+      warnings.push(SCANNED_PDF_WARNING_OCR_TRIED);
+      warnings.push(...ocr.warnings);
+      return { text: ocr.text, pages, warnings };
+    }
+    // OCR didn't produce text — surface both the original "scanned" notice
+    // and whatever OCR's own warning was.
+    warnings.push(SCANNED_PDF_WARNING_OCR_FAILED);
+    warnings.push(...ocr.warnings);
+    return { text: "", pages, warnings };
   } catch (err) {
     const msg = err instanceof Error ? err.message : "PDF parsing failed";
     warnings.push(`PDF could not be parsed (encrypted or corrupted): ${msg}`);

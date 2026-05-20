@@ -43,6 +43,12 @@ interface ExtractResponse {
   elements: LegalElements;
   summary: string;
   clarifyingQuestions: ClarifyingQuestion[];
+  /** Present only when the request used Mixture-of-Agents (auto/...). */
+  candidates?: Array<{
+    modelId: string;
+    status: "ok" | "failed";
+    error?: string;
+  }>;
 }
 
 interface SearchResponse {
@@ -430,12 +436,14 @@ export function ChatInput() {
       }
       const exData = (await exRes.json()) as ExtractResponse;
 
-      // Persist summary + elements onto the turn right away — even if search
-      // fails afterwards, the user still sees the document summary (which
-      // is the main thing they want for "summarize this PDF" requests).
+      // Persist summary + elements + (optional) MoA audit onto the turn
+      // right away — even if search fails afterwards, the user still sees
+      // the document summary (which is the main thing they want for
+      // "summarize this PDF" requests).
       updateTurn(targetId, turnId, {
         elements: exData.elements,
         summary: exData.summary,
+        moaCandidates: exData.candidates,
       });
 
       const srRes = await fetch("/api/search", {

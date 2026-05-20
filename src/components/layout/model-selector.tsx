@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { useLocale, useTranslations } from "next-intl";
-import { Brain, Check, ChevronDown, Zap } from "lucide-react";
+import { Brain, Check, ChevronDown, Sparkles, Zap } from "lucide-react";
 
 import { useCases } from "@/components/cases/cases-context";
 import { cn } from "@/lib/utils";
@@ -10,36 +10,57 @@ import {
   DEFAULT_MODEL_ID,
   FAMILY_LABELS,
   MODEL_OPTIONS,
+  MOA_MODEL_ID,
   TIER_LABELS,
   resolveModel,
   type ModelFamily,
   type ModelOption,
 } from "@/lib/models";
 
-/** Small icon used as a brand glyph next to each option. */
+/* -------------------------------------------------------------------------- */
+/* Family glyph                                                                */
+/* -------------------------------------------------------------------------- */
+
+const FAMILY_GLYPH: Record<
+  ModelFamily,
+  { letter: string; classes: string }
+> = {
+  auto: {
+    letter: "✦",
+    classes: "bg-gradient-to-br from-indigo-500 to-violet-600 text-white",
+  },
+  anthropic: { letter: "A", classes: "bg-orange-100 text-orange-700" },
+  openai: { letter: "O", classes: "bg-emerald-100 text-emerald-700" },
+  google: { letter: "G", classes: "bg-blue-100 text-blue-700" },
+  xai: { letter: "X", classes: "bg-slate-900 text-white" },
+  deepseek: { letter: "D", classes: "bg-cyan-100 text-cyan-700" },
+  meta: { letter: "M", classes: "bg-sky-100 text-sky-700" },
+  moonshot: { letter: "K", classes: "bg-fuchsia-100 text-fuchsia-700" },
+  mistral: { letter: "Ⓜ", classes: "bg-amber-100 text-amber-700" },
+};
+
 function FamilyGlyph({ family }: { family: ModelFamily }) {
-  const letter =
-    family === "anthropic" ? "A" : family === "openai" ? "O" : "G";
-  const color =
-    family === "anthropic"
-      ? "bg-orange-100 text-orange-700"
-      : family === "openai"
-        ? "bg-emerald-100 text-emerald-700"
-        : "bg-blue-100 text-blue-700";
+  const g = FAMILY_GLYPH[family] ?? FAMILY_GLYPH.anthropic;
   return (
     <span
       className={cn(
         "flex h-5 w-5 shrink-0 items-center justify-center rounded text-[10px] font-bold",
-        color,
+        g.classes,
       )}
       aria-hidden
     >
-      {letter}
+      {g.letter}
     </span>
   );
 }
 
-function TierBadge({ tier, locale }: { tier: ModelOption["tier"]; locale: "ko" | "en" }) {
+function TierBadge({
+  tier,
+  locale,
+}: {
+  tier: ModelOption["tier"];
+  locale: "ko" | "en";
+}) {
   const label = TIER_LABELS[tier][locale];
   const color =
     tier === "premium"
@@ -59,6 +80,10 @@ function TierBadge({ tier, locale }: { tier: ModelOption["tier"]; locale: "ko" |
   );
 }
 
+/* -------------------------------------------------------------------------- */
+/* Selector                                                                    */
+/* -------------------------------------------------------------------------- */
+
 export function ModelSelector(): React.ReactElement {
   const tHeader = useTranslations("header");
   const locale = useLocale() as "ko" | "en";
@@ -69,8 +94,10 @@ export function ModelSelector(): React.ReactElement {
 
   const currentId = selectedModelId ?? DEFAULT_MODEL_ID;
   const current = resolveModel(currentId);
+  const isMoaSelected = current.id === MOA_MODEL_ID;
 
-  // Group models by family for the menu sections.
+  // Group models by family. We rely on MODEL_OPTIONS already being in the
+  // intended display order (auto first, then anthropic, ...).
   const grouped = React.useMemo(() => {
     const m = new Map<ModelFamily, ModelOption[]>();
     for (const opt of MODEL_OPTIONS) {
@@ -81,7 +108,6 @@ export function ModelSelector(): React.ReactElement {
     return Array.from(m.entries());
   }, []);
 
-  // Close on outside click.
   React.useEffect(() => {
     if (!open) return;
     const onClick = (e: MouseEvent) => {
@@ -110,18 +136,28 @@ export function ModelSelector(): React.ReactElement {
         ref={buttonRef}
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-100"
+        className={cn(
+          "inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-medium transition-colors",
+          isMoaSelected
+            ? "border-indigo-300 bg-gradient-to-r from-indigo-50 to-violet-50 text-indigo-900 hover:from-indigo-100 hover:to-violet-100"
+            : "border-slate-200 bg-white text-slate-700 hover:bg-slate-100",
+        )}
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-label={tHeader("modelSelector")}
         title={current.description}
       >
-        <Brain className="h-3.5 w-3.5 text-slate-500" aria-hidden />
+        {isMoaSelected ? (
+          <Sparkles className="h-3.5 w-3.5 text-indigo-500" aria-hidden />
+        ) : (
+          <Brain className="h-3.5 w-3.5 text-slate-500" aria-hidden />
+        )}
         <FamilyGlyph family={current.family} />
-        <span className="max-w-[160px] truncate">{current.displayName}</span>
+        <span className="max-w-[180px] truncate">{current.displayName}</span>
         <ChevronDown
           className={cn(
-            "h-3 w-3 text-slate-500 transition-transform",
+            "h-3 w-3 transition-transform",
+            isMoaSelected ? "text-indigo-500" : "text-slate-500",
             open && "rotate-180",
           )}
           aria-hidden
@@ -133,7 +169,7 @@ export function ModelSelector(): React.ReactElement {
           ref={menuRef}
           role="listbox"
           aria-label={tHeader("modelSelector")}
-          className="absolute right-0 z-50 mt-1.5 w-[240px] overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg"
+          className="absolute right-0 z-50 mt-1.5 w-[320px] overflow-hidden rounded-lg border border-slate-200 bg-white shadow-xl"
         >
           <div className="border-b border-slate-100 px-3 py-2">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
@@ -143,9 +179,16 @@ export function ModelSelector(): React.ReactElement {
               {tHeader("modelSelectorHint")}
             </p>
           </div>
-          <div className="max-h-[440px] overflow-y-auto py-1">
+          <div className="max-h-[480px] overflow-y-auto py-1">
             {grouped.map(([family, options]) => (
-              <div key={family} className="py-1">
+              <div
+                key={family}
+                className={cn(
+                  "py-1",
+                  family === "auto" &&
+                    "border-b border-slate-100 bg-gradient-to-b from-indigo-50/40 to-transparent pb-2",
+                )}
+              >
                 <div className="flex items-center gap-1.5 px-3 py-1">
                   <FamilyGlyph family={family} />
                   <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
@@ -154,6 +197,7 @@ export function ModelSelector(): React.ReactElement {
                 </div>
                 {options.map((opt) => {
                   const selected = opt.id === currentId;
+                  const isMoa = opt.id === MOA_MODEL_ID;
                   return (
                     <button
                       key={opt.id}
@@ -167,20 +211,38 @@ export function ModelSelector(): React.ReactElement {
                       className={cn(
                         "flex w-full items-center gap-2 px-3 py-1.5 text-left transition-colors hover:bg-slate-50",
                         selected && "bg-slate-100/80",
+                        isMoa &&
+                          "hover:bg-gradient-to-r hover:from-indigo-50 hover:to-violet-50",
                       )}
                       title={opt.description}
                     >
                       <span className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center">
                         {selected ? (
-                          <Check className="h-3.5 w-3.5 text-slate-900" aria-hidden />
+                          <Check
+                            className="h-3.5 w-3.5 text-slate-900"
+                            aria-hidden
+                          />
+                        ) : isMoa ? (
+                          <Sparkles
+                            className="h-3 w-3 text-indigo-500"
+                            aria-hidden
+                          />
                         ) : opt.tier === "premium" ? (
-                          <Brain className="h-3 w-3 text-violet-400" aria-hidden />
+                          <Brain
+                            className="h-3 w-3 text-violet-400"
+                            aria-hidden
+                          />
                         ) : (
                           <Zap className="h-3 w-3 text-slate-400" aria-hidden />
                         )}
                       </span>
                       <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-900">
                         {opt.displayName}
+                        {opt.experimental && (
+                          <span className="ml-1.5 rounded bg-amber-100 px-1 py-0.5 text-[9px] font-semibold uppercase text-amber-800">
+                            beta
+                          </span>
+                        )}
                       </span>
                       <TierBadge tier={opt.tier} locale={locale} />
                     </button>
