@@ -72,7 +72,7 @@ export const MODEL_OPTIONS: ModelOption[] = [
   // ─── ChatGPT (strongest reasoning + most reliable structured output) ──
   {
     id: "openai/gpt-5.5",
-    displayName: "GPT-5.5",
+    displayName: "ChatGPT 5.5",
     family: "openai",
     tier: "premium",
     description:
@@ -81,7 +81,7 @@ export const MODEL_OPTIONS: ModelOption[] = [
   },
   {
     id: "openai/gpt-5.5-pro",
-    displayName: "GPT-5.5 Pro",
+    displayName: "ChatGPT 5.5 Pro",
     family: "openai",
     tier: "premium",
     description:
