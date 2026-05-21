@@ -153,7 +153,7 @@
     "errorTurn": "This response failed to generate.",
     "yourQuestion": "Your question",
     "agentAnswer": "Law Agent",
-    "answerSummary": "Summary",
+    "answerSummary": "Answer",
     "topMatches": "Similar precedents",
     "viewDetails": "View details",
     "hideDetails": "Hide details",
@@ -166,7 +166,7 @@
     "bestAnswer": "★ Best answer",
     "download": "Download",
     "downloadTooltip": "Download this model's answer as a Markdown (.md) file. Open in Word / Google Docs, or attach to a brief.",
-    "manusSlowHint": "Manus is an autonomous agent — it browses the web + runs multi-step reasoning. Unlike a regular LLM, this can take 5–30 minutes."
+    "manusSlowHint": "Manus is now running in fast LLM mode (lite profile) — typically completes in 15–60s, comparable to other models."
   },
   "chips": {
     "summarize": {

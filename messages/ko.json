@@ -153,7 +153,7 @@
     "errorTurn": "이 응답을 생성하지 못했습니다.",
     "yourQuestion": "내 질문",
     "agentAnswer": "Law Agent",
-    "answerSummary": "요약",
+    "answerSummary": "답변",
     "topMatches": "유사 판례",
     "viewDetails": "자세히 보기",
     "hideDetails": "접기",
@@ -166,7 +166,7 @@
     "bestAnswer": "★ 최고 답",
     "download": "다운로드",
     "downloadTooltip": "이 모델의 답변을 마크다운(.md) 파일로 다운로드합니다. 워드/한글에서 열어 그대로 사용하거나, 변호사 의견서에 첨부할 수 있습니다.",
-    "manusSlowHint": "Manus는 웹 검색 + 다단계 추론을 수행하는 자율 에이전트입니다. 일반 LLM과 달리 5–30분이 소요될 수 있습니다."
+    "manusSlowHint": "Manus는 빠른 LLM 모드(lite)로 동작 중입니다 — 일반적으로 15–60초 안에 완료되며, 다른 모델과 비슷한 속도입니다."
   },
   "chips": {
     "summarize": {

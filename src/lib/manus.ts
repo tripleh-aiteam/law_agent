@@ -23,10 +23,12 @@ const MANUS_BASE_URL = "https://api.manus.ai";
 const CREATE_TASK_PATH = "/v1/tasks";
 const GET_TASK_PATH = (id: string) => `/v1/tasks/${encodeURIComponent(id)}`;
 
-/** How often we poll while the task is running (ms). */
-const POLL_INTERVAL_MS = 5_000;
-/** Hard ceiling on polling — task is considered timed out after this. */
-const POLL_MAX_MS = 25 * 60 * 1000; // 25 min
+/** How often we poll while the task is running (ms). Lite tasks finish in
+ *  ~15–60s so a 2s interval gives snappy UX without hammering the API. */
+const POLL_INTERVAL_MS = 2_000;
+/** Hard ceiling on polling. Lite tasks rarely exceed 90s but we leave 5
+ *  min of headroom for edge cases (large prompts, retries, etc.). */
+const POLL_MAX_MS = 5 * 60 * 1000;
 
 export type ManusTaskStatus =
   | "pending"
@@ -103,7 +105,20 @@ async function throwFromResponse(res: Response): Promise<never> {
   throw new Error(`[http_${code}] ${message}`);
 }
 
-/** POST /v1/tasks — kick off a new autonomous-agent task. */
+/**
+ * Default Manus agent profile. Options (per Manus API):
+ *  - "manus-1.6"      : full autonomous agent — browses web, runs code,
+ *                        multi-step planning. Slow (3–30 min per task).
+ *  - "manus-1.6-lite" : FAST LLM-only profile. Skips agentic tool use,
+ *                        answers like a normal chat completion. ~15–60s
+ *                        per query. THIS IS OUR DEFAULT because most
+ *                        legal questions don't actually need the agentic
+ *                        capabilities, and 30 min was killing UX.
+ *  - "manus-1.6-max"  : Higher-compute autonomous agent. Slowest.
+ */
+const DEFAULT_AGENT_PROFILE = "manus-1.6-lite";
+
+/** POST /v1/tasks — kick off a new task. */
 export async function createTask(
   prompt: string,
   signal?: AbortSignal,
@@ -111,7 +126,10 @@ export async function createTask(
   const res = await fetch(`${MANUS_BASE_URL}${CREATE_TASK_PATH}`, {
     method: "POST",
     headers: authHeaders(),
-    body: JSON.stringify({ prompt }),
+    body: JSON.stringify({
+      prompt,
+      agentProfile: DEFAULT_AGENT_PROFILE,
+    }),
     signal,
   });
   if (!res.ok) await throwFromResponse(res);

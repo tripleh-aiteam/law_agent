@@ -45,11 +45,11 @@ export const MODEL_OPTIONS: ModelOption[] = [
   // research that goes beyond what's in our local 판례 corpus.
   {
     id: "manus/agent",
-    displayName: "Manus (autonomous agent)",
+    displayName: "Manus",
     family: "manus",
     tier: "premium",
     description:
-      "Full autonomous agent — browses the web, drafts reports, runs multi-step research. SLOW (5–30 min per task) and EXPENSIVE (~$0.50–$5/query). Use for hard cases that need live court-case research, not for routine queries. Needs MANUS_API_KEY on Vercel.",
+      "Manus AI (lite profile). Fast LLM-only mode — ~15–60s per query, comparable to other models. The full autonomous-agent mode (web browsing, multi-step research) is available as a separate config; lite is the default for normal legal questions.",
     korean: 4,
     experimental: true,
   },
