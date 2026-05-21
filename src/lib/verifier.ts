@@ -21,13 +21,21 @@ const VERIFY_TIMEOUT_MS = 8_000;
 /**
  * Verifies that a 판례 caseNumber is real and retrievable.
  *
- * Behavior:
- * - If LAW_GO_KR_API_KEY is set: queries law.go.kr's open API. Parses
- *   defensively; any HTTP or shape error → false (fail-closed for verification).
- * - If no API key: returns true iff the caseNumber is present in the local
- *   corpus. This is "fail-open for corpus presence" — we trust our curated
- *   corpus enough to treat in-corpus cases as verified — and fail-closed for
- *   anything else.
+ * Behavior (corpus-first, since corpus came from law.go.kr):
+ *  1. If the caseNumber is in our local 대법원 corpus → verified=true
+ *     immediately. The 1,608-case corpus was ingested via the official
+ *     law.go.kr Open API, so presence is sufficient proof. This is the
+ *     overwhelmingly common case at query time — semantic search only
+ *     returns matches that ARE in the corpus.
+ *  2. If NOT in corpus AND LAW_GO_KR_API_KEY is set → try the live
+ *     law.go.kr Open API. Often fails from Vercel's foreign edge IPs
+ *     because the Korean Ministry of Justice firewall blocks them;
+ *     that returns false (fail-closed).
+ *  3. If NOT in corpus AND no API key → fail-closed.
+ *
+ * Previous behavior tried the live API FIRST whenever LAW_GO_KR_API_KEY
+ * was set, which on Vercel meant every match got marked "unverified"
+ * even when the case was sitting right there in our verified corpus.
  */
 export async function verifyCitation(caseNumber: string): Promise<boolean> {
   const key = caseNumber.trim();
@@ -35,15 +43,20 @@ export async function verifyCitation(caseNumber: string): Promise<boolean> {
   const cached = verificationCache.get(key);
   if (cached !== undefined) return cached;
 
-  const apiKey = process.env.LAW_GO_KR_API_KEY?.trim();
-
-  if (!apiKey) {
-    const corpusSet = await getCorpusCaseNumbers();
-    const present = corpusSet.has(key);
-    verificationCache.set(key, present);
-    return present;
+  // ── Step 1: corpus-presence check (cheap + reliable). ──────────────
+  const corpusSet = await getCorpusCaseNumbers();
+  if (corpusSet.has(key)) {
+    verificationCache.set(key, true);
+    return true;
   }
 
+  const apiKey = process.env.LAW_GO_KR_API_KEY?.trim();
+  if (!apiKey) {
+    verificationCache.set(key, false);
+    return false;
+  }
+
+  // ── Step 2: case is NOT in our snapshot — try law.go.kr live. ──────
   // law.go.kr open API pattern. We use `prec` (판례) target with JSON output.
   //
   // HTTP (not HTTPS): law.go.kr's HTTPS configuration is broken — the TLS

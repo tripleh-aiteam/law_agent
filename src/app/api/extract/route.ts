@@ -164,28 +164,23 @@ function directKeyEnvVar(family: string | undefined): string | undefined {
 }
 
 /**
- * Compose the prompt we hand to Manus. Manus accepts free-form natural
- * language, so we phrase the request as a high-value research task it can
- * actually plan and execute against — not as "extract these JSON fields".
+ * Compose the prompt we hand to Manus. The narrative already contains
+ * the user's question + any attached files (assembled by chat-input's
+ * buildNarrative). We pass it through with only a minimal Korean-legal
+ * context hint — NO 5-step research instructions, NO "find precedents
+ * with case numbers" directive.
+ *
+ * Why so minimal: Manus's lite profile is fast (~15-60s) for plain
+ * chat-style answers, but the moment you ask for "supreme court
+ * precedents with case numbers + citability assessment" the model
+ * re-engages its autonomous-agent skills and the call balloons to
+ * 5+ minutes. The user's intent (e.g. "find precedents on X") is
+ * already inside the narrative — let Manus respond at chat speed.
  */
 function buildManusPrompt(narrative: string, locale: "ko" | "en"): string {
   const isKo = locale === "ko";
-  return [
-    isKo
-      ? "당신은 한국 법률 리서치 보조 에이전트입니다. 사용자가 제공한 사건의 사실관계와 첨부 문서를 검토하고, 인터넷에서 최근 대법원 판례와 관련 법령을 추가로 조사하여 다음을 한국어로 작성해 주세요:"
-      : "You are a Korean legal research assistant agent. Review the user-provided case facts and any attached documents, supplement with up-to-date Korean Supreme Court (대법원) precedent and statute research from the web, and produce the following — preserve Korean legal terms inline:",
-    "",
-    isKo ? "1. 사건 요약 (2-3 단락)" : "1. Case summary (2-3 paragraphs)",
-    isKo ? "2. 핵심 쟁점 (3-5개, 한국어 법률 용어 사용)" : "2. Core issues (3-5, using Korean legal terms)",
-    isKo
-      ? "3. 적용 가능한 대법원 판례 (사건번호 + 인용 가능성 평가 포함, 최소 3건)"
-      : "3. Applicable Supreme Court precedents (with case numbers + citability assessment, at least 3)",
-    isKo ? "4. 상대방이 제기할 예상 반박 논거" : "4. Anticipated counter-arguments from opposing counsel",
-    isKo ? "5. 변호사의 다음 단계 권고 사항" : "5. Recommended next steps for counsel",
-    "",
-    "---",
-    isKo ? "사건 자료:" : "Case material:",
-    "---",
-    narrative,
-  ].join("\n");
+  const hint = isKo
+    ? "한국 법률 자문 맥락에서의 질문입니다. 한국 법률 용어(쟁점, 청구원인, 판시사항 등)는 그대로 유지하고, 한국어로 간결하게 답해 주세요."
+    : "This is a Korean legal advice context. Preserve Korean legal terms (쟁점, 청구원인, 판시사항 etc.) inline. Answer concisely.";
+  return `${hint}\n\n---\n\n${narrative.trim()}`;
 }
