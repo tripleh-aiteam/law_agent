@@ -6,6 +6,7 @@ import {
   Building2,
   FileDiff,
   FileWarning,
+  Gavel,
   Globe,
   Settings2,
   ShieldOff,
@@ -90,6 +91,16 @@ export function Header() {
       <div className="flex items-center gap-1.5">
         {/* Tool quick-actions — utility tools that don't belong in the
             conversation flow (PII redact, business lookup, contract review). */}
+        <button
+          type="button"
+          onClick={() => setActiveTool("civil-draft")}
+          className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-100"
+          title="⚖️ 소장 / 답변서 작성 / Civil court draft"
+          aria-label="Civil court draft"
+        >
+          <Gavel className="h-3.5 w-3.5 text-slate-500" aria-hidden />
+          소장
+        </button>
         <button
           type="button"
           onClick={() => setActiveTool("contract-redline")}

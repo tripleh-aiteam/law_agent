@@ -1,0 +1,13 @@
+.next
+node_modules
+.git
+*.log
+.env.local
+.env.development.local
+.claude-flow
+.swarm
+ruvector.db
+agentdb.rvf
+agentdb.rvf.lock
+tsconfig.tsbuildinfo
+Daily_changes.md

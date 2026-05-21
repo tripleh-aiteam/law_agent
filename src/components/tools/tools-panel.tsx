@@ -7,6 +7,7 @@ import {
   Building2,
   CheckCircle2,
   Copy,
+  Download,
   FileDiff,
   FileWarning,
   Info,
@@ -16,6 +17,11 @@ import {
   X,
   XCircle,
 } from "lucide-react";
+
+import type {
+  CivilDraft,
+  CivilDraftInput,
+} from "@/lib/court-draft";
 
 import { cn } from "@/lib/utils";
 
@@ -28,6 +34,7 @@ export type ToolsPanelTool =
   | "business-lookup"
   | "contract-redline"
   | "document-diff"
+  | "civil-draft"
   | null;
 
 /**
@@ -56,7 +63,9 @@ export function ToolsPanel({
       <aside
         className={cn(
           "w-full overflow-y-auto bg-white shadow-2xl",
-          tool === "contract-redline" || tool === "document-diff"
+          tool === "contract-redline" ||
+            tool === "document-diff" ||
+            tool === "civil-draft"
             ? "max-w-5xl"
             : "max-w-2xl",
         )}
@@ -69,7 +78,9 @@ export function ToolsPanel({
                 ? "🏢 사업자등록번호 조회"
                 : tool === "contract-redline"
                   ? "📋 계약서 검토 / Contract Redline"
-                  : "📑 문서 비교 / Document Comparison"}
+                  : tool === "document-diff"
+                    ? "📑 문서 비교 / Document Comparison"
+                    : "⚖️ 소장 · 답변서 작성 / Civil Court Draft"}
           </h2>
           <button
             type="button"
@@ -85,6 +96,7 @@ export function ToolsPanel({
           {tool === "business-lookup" && <BusinessLookupTool />}
           {tool === "contract-redline" && <ContractRedlineTool />}
           {tool === "document-diff" && <DocumentDiffTool />}
+          {tool === "civil-draft" && <CivilDraftTool />}
         </div>
       </aside>
     </div>
@@ -1223,4 +1235,575 @@ function SeverityPill({
       {count !== undefined && <span className="opacity-75">×{count}</span>}
     </span>
   );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Civil court draft tool — 소장 / 답변서 generator                            */
+/* -------------------------------------------------------------------------- */
+
+type DraftDocType = "complaint" | "answer";
+
+const ID_LABEL_OPTIONS = [
+  "주민등록번호",
+  "사업자등록번호",
+  "법인등록번호",
+  "외국인등록번호",
+  "비공개",
+];
+
+function emptyParty(): CivilDraftInput["plaintiff"] {
+  return {
+    name: "",
+    idLabel: "주민등록번호",
+    idNumber: "",
+    address: "",
+    contact: "",
+    representative: "",
+  };
+}
+
+function CivilDraftTool(): React.ReactElement {
+  const [docType, setDocType] = React.useState<DraftDocType>("complaint");
+  const [claimCategory, setClaimCategory] = React.useState("");
+  const [claimAmount, setClaimAmount] = React.useState("");
+  const [caseNumber, setCaseNumber] = React.useState("");
+  const [preferredCourt, setPreferredCourt] = React.useState("");
+  const [caseFacts, setCaseFacts] = React.useState("");
+  const [legalBasis, setLegalBasis] = React.useState("");
+  const [citedPrecedents, setCitedPrecedents] = React.useState("");
+  const [plaintiff, setPlaintiff] = React.useState(emptyParty());
+  const [defendant, setDefendant] = React.useState(emptyParty());
+
+  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  const [draft, setDraft] = React.useState<CivilDraft | null>(null);
+
+  const generate = async () => {
+    if (!claimCategory.trim()) {
+      setError("청구 유형을 입력해주세요 / Enter claim category.");
+      return;
+    }
+    if (caseFacts.trim().length < 50) {
+      setError("사실관계를 최소 50자 이상 작성해주세요 / Case facts must be at least 50 characters.");
+      return;
+    }
+    if (!plaintiff.name.trim() || !defendant.name.trim()) {
+      setError("원고·피고 이름을 입력해주세요 / Enter both party names.");
+      return;
+    }
+    setError(null);
+    setLoading(true);
+    setDraft(null);
+    try {
+      const body: CivilDraftInput = {
+        documentType: docType,
+        claimCategory: claimCategory.trim(),
+        plaintiff,
+        defendant,
+        caseFacts: caseFacts.trim(),
+      };
+      if (claimAmount.trim()) {
+        const n = Number(claimAmount.replace(/[^0-9]/g, ""));
+        if (n > 0) body.claimAmountKrw = n;
+      }
+      if (legalBasis.trim()) body.legalBasis = legalBasis.trim();
+      if (citedPrecedents.trim()) body.citedPrecedents = citedPrecedents.trim();
+      if (docType === "answer" && caseNumber.trim())
+        body.caseNumber = caseNumber.trim();
+      if (preferredCourt.trim()) body.preferredCourt = preferredCourt.trim();
+
+      const res = await fetch("/api/draft/civil", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        setError(json.error ?? `요청 실패 (HTTP ${res.status})`);
+        return;
+      }
+      setDraft(json.draft as CivilDraft);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Draft request failed");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="space-y-5 text-sm">
+      <p className="text-slate-600">
+        사건 사실관계와 당사자 정보를 입력하면, 한국 민사소송법·민사소송규칙에 따라
+        정식 양식의 <strong>소장</strong> 또는 <strong>답변서</strong>를 작성합니다.
+        결과는 Word 문서로 내려받을 수 있습니다.
+      </p>
+
+      {/* Doc type toggle */}
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setDocType("complaint")}
+          className={cn(
+            "rounded-md border px-3 py-1.5 text-xs font-medium transition-colors",
+            docType === "complaint"
+              ? "border-indigo-500 bg-indigo-50 text-indigo-700"
+              : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50",
+          )}
+        >
+          소장 (원고 측)
+        </button>
+        <button
+          type="button"
+          onClick={() => setDocType("answer")}
+          className={cn(
+            "rounded-md border px-3 py-1.5 text-xs font-medium transition-colors",
+            docType === "answer"
+              ? "border-indigo-500 bg-indigo-50 text-indigo-700"
+              : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50",
+          )}
+        >
+          답변서 (피고 측)
+        </button>
+      </div>
+
+      {/* Case identifying fields */}
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="청구 유형 (사건명)" required>
+          <input
+            value={claimCategory}
+            onChange={(e) => setClaimCategory(e.target.value)}
+            placeholder="예: 대여금, 손해배상(기), 약정금, 부당이득반환"
+            className="w-full rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200"
+          />
+        </Field>
+        <Field label="청구 금액 (KRW, 선택)">
+          <input
+            value={claimAmount}
+            onChange={(e) => setClaimAmount(e.target.value)}
+            placeholder="예: 50,000,000"
+            className="w-full rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200"
+          />
+        </Field>
+        {docType === "answer" && (
+          <Field label="사건번호 (법원 부여)" required>
+            <input
+              value={caseNumber}
+              onChange={(e) => setCaseNumber(e.target.value)}
+              placeholder="예: 2026가단12345"
+              className="w-full rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200"
+            />
+          </Field>
+        )}
+        <Field label="희망 관할법원 (선택)">
+          <input
+            value={preferredCourt}
+            onChange={(e) => setPreferredCourt(e.target.value)}
+            placeholder="예: 서울중앙지방법원"
+            className="w-full rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200"
+          />
+        </Field>
+      </div>
+
+      {/* Parties */}
+      <div className="grid grid-cols-2 gap-4">
+        <PartyForm
+          title="원고 (Plaintiff)"
+          value={plaintiff}
+          onChange={setPlaintiff}
+        />
+        <PartyForm
+          title="피고 (Defendant)"
+          value={defendant}
+          onChange={setDefendant}
+        />
+      </div>
+
+      {/* Case facts */}
+      <Field label="사실관계 (시간순으로 구체적으로)" required>
+        <textarea
+          value={caseFacts}
+          onChange={(e) => setCaseFacts(e.target.value)}
+          placeholder="예: 2024. 3. 15. 원고는 피고에게 5천만원을 변제기 2025. 3. 14.로 정하여 대여하였다. 피고는 변제기까지 단 한 차례도 변제하지 않았고…"
+          rows={8}
+          className="w-full resize-y rounded-md border border-slate-300 bg-white px-3 py-2 font-mono text-sm leading-relaxed outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200"
+        />
+        <p className="text-[11px] text-slate-500">
+          최소 50자. 날짜·금액·장소·당사자 행위를 구체적으로.
+        </p>
+      </Field>
+
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="법적 근거 / 적용 법령 (선택)">
+          <textarea
+            value={legalBasis}
+            onChange={(e) => setLegalBasis(e.target.value)}
+            placeholder="예: 민법 § 598 (소비대차), § 387 (이행지체)"
+            rows={3}
+            className="w-full resize-y rounded-md border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200"
+          />
+        </Field>
+        <Field label="참고 판례 (선택)">
+          <textarea
+            value={citedPrecedents}
+            onChange={(e) => setCitedPrecedents(e.target.value)}
+            placeholder="예: 대법원 2019다204876 판결"
+            rows={3}
+            className="w-full resize-y rounded-md border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200"
+          />
+        </Field>
+      </div>
+
+      {error && (
+        <div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
+          {error}
+        </div>
+      )}
+
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          onClick={generate}
+          disabled={loading}
+          className="inline-flex items-center gap-2 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {loading && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
+          {docType === "complaint" ? "소장 작성하기" : "답변서 작성하기"}
+        </button>
+        {loading && (
+          <span className="text-xs text-slate-500">
+            LLM이 정식 양식으로 작성하고 있습니다. 보통 30–90초 소요.
+          </span>
+        )}
+      </div>
+
+      {draft && <CivilDraftResultView draft={draft} />}
+    </div>
+  );
+}
+
+function Field({
+  label,
+  required,
+  children,
+}: {
+  label: string;
+  required?: boolean;
+  children: React.ReactNode;
+}): React.ReactElement {
+  return (
+    <label className="block space-y-1">
+      <span className="text-xs font-medium text-slate-700">
+        {label}
+        {required && <span className="ml-1 text-rose-500">*</span>}
+      </span>
+      {children}
+    </label>
+  );
+}
+
+function PartyForm({
+  title,
+  value,
+  onChange,
+}: {
+  title: string;
+  value: CivilDraftInput["plaintiff"];
+  onChange: (v: CivilDraftInput["plaintiff"]) => void;
+}): React.ReactElement {
+  const upd = (patch: Partial<CivilDraftInput["plaintiff"]>) =>
+    onChange({ ...value, ...patch });
+  return (
+    <div className="space-y-2 rounded-md border border-slate-200 bg-slate-50/50 p-3">
+      <div className="text-xs font-semibold text-slate-800">{title}</div>
+      <input
+        value={value.name}
+        onChange={(e) => upd({ name: e.target.value })}
+        placeholder="이름 / 상호 *"
+        className="w-full rounded border border-slate-300 bg-white px-2 py-1 text-sm outline-none focus:border-indigo-400"
+      />
+      <div className="flex gap-2">
+        <select
+          value={value.idLabel}
+          onChange={(e) => upd({ idLabel: e.target.value })}
+          className="rounded border border-slate-300 bg-white px-2 py-1 text-xs outline-none focus:border-indigo-400"
+        >
+          {ID_LABEL_OPTIONS.map((o) => (
+            <option key={o} value={o}>
+              {o}
+            </option>
+          ))}
+        </select>
+        <input
+          value={value.idNumber}
+          onChange={(e) => upd({ idNumber: e.target.value })}
+          placeholder="번호 (또는 '비공개')"
+          className="flex-1 rounded border border-slate-300 bg-white px-2 py-1 text-sm outline-none focus:border-indigo-400"
+        />
+      </div>
+      <input
+        value={value.address}
+        onChange={(e) => upd({ address: e.target.value })}
+        placeholder="주소 *"
+        className="w-full rounded border border-slate-300 bg-white px-2 py-1 text-sm outline-none focus:border-indigo-400"
+      />
+      <div className="grid grid-cols-2 gap-2">
+        <input
+          value={value.contact ?? ""}
+          onChange={(e) => upd({ contact: e.target.value })}
+          placeholder="연락처 (선택)"
+          className="rounded border border-slate-300 bg-white px-2 py-1 text-sm outline-none focus:border-indigo-400"
+        />
+        <input
+          value={value.representative ?? ""}
+          onChange={(e) => upd({ representative: e.target.value })}
+          placeholder="대표자/대리인 (선택)"
+          className="rounded border border-slate-300 bg-white px-2 py-1 text-sm outline-none focus:border-indigo-400"
+        />
+      </div>
+    </div>
+  );
+}
+
+function CivilDraftResultView({
+  draft,
+}: {
+  draft: CivilDraft;
+}): React.ReactElement {
+  const title = draft.documentType === "complaint" ? "소  장" : "답  변  서";
+  const evidenceLabel =
+    draft.documentType === "complaint" ? "입 증 방 법" : "입 증 방 법";
+
+  const downloadAsWord = () => {
+    const html = buildCourtDocHtml(draft, title);
+    const blob = new Blob(
+      [
+        "﻿",
+        `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"><title>${title}</title></head><body>`,
+        html,
+        "</body></html>",
+      ],
+      { type: "application/msword" },
+    );
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    const safeCaption = draft.caption.replace(/[^\w가-힣\-()_ ]/g, "");
+    a.download = `${title.replace(/\s/g, "")}_${safeCaption || "draft"}.doc`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  return (
+    <div className="space-y-5 rounded-md border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="flex items-center justify-between">
+        <div className="space-y-0.5">
+          <div className="text-xs font-semibold uppercase tracking-wide text-indigo-600">
+            {draft.documentType === "complaint" ? "Complaint / 소장" : "Answer / 답변서"}
+          </div>
+          <div className="text-lg font-semibold text-slate-900">
+            {draft.caption}
+            {draft.caseNumber && (
+              <span className="ml-2 text-sm font-normal text-slate-500">
+                ({draft.caseNumber})
+              </span>
+            )}
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={downloadAsWord}
+          className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-100"
+        >
+          <Download className="h-3.5 w-3.5" aria-hidden />
+          Word 다운로드 (.doc)
+        </button>
+      </div>
+
+      <div className="space-y-4 font-serif text-[15px] leading-relaxed text-slate-900">
+        <div className="text-center text-2xl font-bold tracking-[0.4em]">
+          {title}
+        </div>
+
+        <div className="space-y-2">
+          {draft.parties.map((p, idx) => (
+            <div key={idx} className="border-l-2 border-slate-300 pl-3">
+              <div className="text-sm font-semibold text-slate-700">
+                {p.role}
+              </div>
+              <div>{p.name}</div>
+              <div className="text-sm text-slate-700">
+                ({p.idLabel}: {p.idNumber})
+              </div>
+              <div className="text-sm text-slate-700">{p.address}</div>
+              {p.contact && (
+                <div className="text-sm text-slate-700">{p.contact}</div>
+              )}
+              {p.representative && (
+                <div className="text-sm text-slate-700">
+                  대표자/대리인: {p.representative}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+
+        <div className="space-y-1">
+          <div className="font-semibold">사건명: {draft.caption}</div>
+        </div>
+
+        <section className="space-y-1">
+          <div className="text-center font-bold tracking-[0.3em]">
+            청 구 취 지
+          </div>
+          <ol className="ml-6 list-decimal space-y-1">
+            {draft.prayerForRelief.map((p, i) => (
+              <li key={i}>{p}</li>
+            ))}
+          </ol>
+          <div className="pt-1 text-right">라는 판결을 구합니다.</div>
+        </section>
+
+        <section className="space-y-2">
+          <div className="text-center font-bold tracking-[0.3em]">
+            청 구 원 인
+          </div>
+          <div className="whitespace-pre-wrap">{draft.factsAndLaw}</div>
+        </section>
+
+        <section className="space-y-1">
+          <div className="text-center font-bold tracking-[0.3em]">
+            {evidenceLabel}
+          </div>
+          <ol className="ml-6 list-decimal space-y-1">
+            {draft.evidence.map((e, i) => (
+              <li key={i}>
+                <span className="font-semibold">{e.label}</span> — {e.title}
+                <span className="ml-2 text-slate-600">({e.purpose})</span>
+              </li>
+            ))}
+          </ol>
+        </section>
+
+        <section className="space-y-1">
+          <div className="text-center font-bold tracking-[0.3em]">
+            첨 부 서 류
+          </div>
+          <ol className="ml-6 list-decimal space-y-1">
+            {draft.attachments.map((a, i) => (
+              <li key={i}>{a}</li>
+            ))}
+          </ol>
+        </section>
+
+        <div className="space-y-1 pt-2">
+          <div className="text-right">{draft.filingDate}</div>
+          <div className="text-right">
+            {draft.documentType === "complaint" ? "원고 " : "피고 "}
+            {draft.parties.find(
+              (p) =>
+                p.role === (draft.documentType === "complaint" ? "원고" : "피고"),
+            )?.name}
+            <span className="ml-2 text-slate-500">(인)</span>
+          </div>
+        </div>
+
+        <div className="text-center font-semibold">{draft.court} 귀중</div>
+      </div>
+
+      <div className="rounded-md border border-amber-200 bg-amber-50 p-3">
+        <div className="text-xs font-semibold text-amber-800">
+          ⚖️ 관할 판단 근거
+        </div>
+        <p className="mt-1 text-xs text-amber-900">
+          {draft.jurisdictionRationale}
+        </p>
+      </div>
+
+      {draft.practicalNotes.length > 0 && (
+        <div className="rounded-md border border-indigo-200 bg-indigo-50/60 p-3">
+          <div className="text-xs font-semibold text-indigo-800">
+            📌 실무 메모 (문서에는 포함되지 않음)
+          </div>
+          <ul className="mt-1 ml-4 list-disc space-y-1 text-xs text-indigo-900">
+            {draft.practicalNotes.map((n, i) => (
+              <li key={i}>{n}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function buildCourtDocHtml(draft: CivilDraft, title: string): string {
+  const partyBlock = draft.parties
+    .map(
+      (p) =>
+        `<div style="margin-bottom:8pt">
+          <div><strong>${escapeHtml(p.role)}</strong></div>
+          <div>${escapeHtml(p.name)}</div>
+          <div>(${escapeHtml(p.idLabel)}: ${escapeHtml(p.idNumber)})</div>
+          <div>${escapeHtml(p.address)}</div>
+          ${p.contact ? `<div>${escapeHtml(p.contact)}</div>` : ""}
+          ${p.representative ? `<div>대표자/대리인: ${escapeHtml(p.representative)}</div>` : ""}
+        </div>`,
+    )
+    .join("");
+
+  const prayer = draft.prayerForRelief
+    .map((s) => `<li>${escapeHtml(s)}</li>`)
+    .join("");
+
+  const evidence = draft.evidence
+    .map(
+      (e) =>
+        `<li><strong>${escapeHtml(e.label)}</strong> — ${escapeHtml(e.title)} (${escapeHtml(e.purpose)})</li>`,
+    )
+    .join("");
+
+  const attachments = draft.attachments
+    .map((a) => `<li>${escapeHtml(a)}</li>`)
+    .join("");
+
+  const signerRole = draft.documentType === "complaint" ? "원고" : "피고";
+  const signer = draft.parties.find((p) => p.role === signerRole)?.name ?? "";
+
+  return `
+    <div style="font-family:'바탕','Batang',serif;font-size:12pt;line-height:1.7">
+      <h1 style="text-align:center;font-size:22pt;letter-spacing:.4em;margin:24pt 0">${escapeHtml(title)}</h1>
+
+      ${partyBlock}
+
+      <p><strong>사건명:</strong> ${escapeHtml(draft.caption)}${draft.caseNumber ? ` (사건번호: ${escapeHtml(draft.caseNumber)})` : ""}</p>
+
+      <h2 style="text-align:center;letter-spacing:.3em;margin-top:18pt">청 구 취 지</h2>
+      <ol>${prayer}</ol>
+      <p style="text-align:right">라는 판결을 구합니다.</p>
+
+      <h2 style="text-align:center;letter-spacing:.3em;margin-top:18pt">청 구 원 인</h2>
+      <div style="white-space:pre-wrap">${escapeHtml(draft.factsAndLaw)}</div>
+
+      <h2 style="text-align:center;letter-spacing:.3em;margin-top:18pt">입 증 방 법</h2>
+      <ol>${evidence}</ol>
+
+      <h2 style="text-align:center;letter-spacing:.3em;margin-top:18pt">첨 부 서 류</h2>
+      <ol>${attachments}</ol>
+
+      <p style="text-align:right;margin-top:24pt">${escapeHtml(draft.filingDate)}</p>
+      <p style="text-align:right">${escapeHtml(signerRole)} ${escapeHtml(signer)} (인)</p>
+
+      <p style="text-align:center;margin-top:24pt;font-weight:bold">${escapeHtml(draft.court)} 귀중</p>
+    </div>
+  `;
 }
