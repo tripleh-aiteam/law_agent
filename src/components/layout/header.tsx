@@ -4,6 +4,7 @@ import * as React from "react";
 import { useLocale, useTranslations } from "next-intl";
 import {
   Building2,
+  FileDiff,
   FileWarning,
   Globe,
   Settings2,
@@ -98,6 +99,16 @@ export function Header() {
         >
           <FileWarning className="h-3.5 w-3.5 text-slate-500" aria-hidden />
           계약서
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTool("document-diff")}
+          className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-100"
+          title="📑 문서 비교 / Side-by-side document diff"
+          aria-label="Document comparison"
+        >
+          <FileDiff className="h-3.5 w-3.5 text-slate-500" aria-hidden />
+          비교
         </button>
         <button
           type="button"

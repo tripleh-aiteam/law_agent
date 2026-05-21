@@ -7,6 +7,7 @@ import {
   Building2,
   CheckCircle2,
   Copy,
+  FileDiff,
   FileWarning,
   Info,
   Loader2,
@@ -26,6 +27,7 @@ export type ToolsPanelTool =
   | "redact"
   | "business-lookup"
   | "contract-redline"
+  | "document-diff"
   | null;
 
 /**
@@ -54,7 +56,9 @@ export function ToolsPanel({
       <aside
         className={cn(
           "w-full overflow-y-auto bg-white shadow-2xl",
-          tool === "contract-redline" ? "max-w-4xl" : "max-w-2xl",
+          tool === "contract-redline" || tool === "document-diff"
+            ? "max-w-5xl"
+            : "max-w-2xl",
         )}
       >
         <header className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-200 bg-white/95 px-5 py-3 backdrop-blur">
@@ -63,7 +67,9 @@ export function ToolsPanel({
               ? "🔒 PII 자동 제거"
               : tool === "business-lookup"
                 ? "🏢 사업자등록번호 조회"
-                : "📋 계약서 검토 / Contract Redline"}
+                : tool === "contract-redline"
+                  ? "📋 계약서 검토 / Contract Redline"
+                  : "📑 문서 비교 / Document Comparison"}
           </h2>
           <button
             type="button"
@@ -78,6 +84,7 @@ export function ToolsPanel({
           {tool === "redact" && <PiiRedactTool />}
           {tool === "business-lookup" && <BusinessLookupTool />}
           {tool === "contract-redline" && <ContractRedlineTool />}
+          {tool === "document-diff" && <DocumentDiffTool />}
         </div>
       </aside>
     </div>
@@ -719,6 +726,467 @@ function RedlineResultView({
         ))}
       </ol>
     </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Document comparison (diff) tool                                             */
+/* -------------------------------------------------------------------------- */
+
+interface DiffRow {
+  kind: "equal" | "removed" | "added" | "changed";
+  originalText?: string;
+  modifiedText?: string;
+  inlineLeft?: Array<{ text: string; kind: "equal" | "removed" }>;
+  inlineRight?: Array<{ text: string; kind: "equal" | "added" }>;
+}
+
+interface DiffStats {
+  equalLines: number;
+  removedLines: number;
+  addedLines: number;
+  changedLines: number;
+}
+
+interface DiffResponse {
+  diff: { rows: DiffRow[]; stats: DiffStats };
+  analysis?: {
+    overallAssessment: string;
+    keyChanges: Array<{
+      summary: string;
+      impact: "favorable" | "unfavorable" | "neutral";
+      explanation: string;
+    }>;
+  };
+  analysisError?: string;
+}
+
+function DocumentDiffTool(): React.ReactElement {
+  const locale = useLocale() as "ko" | "en";
+  const [originalText, setOriginalText] = React.useState("");
+  const [modifiedText, setModifiedText] = React.useState("");
+  const [originalFilename, setOriginalFilename] = React.useState<string | null>(null);
+  const [modifiedFilename, setModifiedFilename] = React.useState<string | null>(null);
+  const [busy, setBusy] = React.useState(false);
+  const [result, setResult] = React.useState<DiffResponse | null>(null);
+  const [error, setError] = React.useState<string | null>(null);
+  const [analyzeLegal, setAnalyzeLegal] = React.useState(true);
+
+  const onPickOriginal = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setOriginalFilename(file.name);
+    await readFileIntoState(file, setOriginalText, setError);
+    e.target.value = "";
+  };
+
+  const onPickModified = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setModifiedFilename(file.name);
+    await readFileIntoState(file, setModifiedText, setError);
+    e.target.value = "";
+  };
+
+  const onCompare = async () => {
+    if (!originalText.trim() || !modifiedText.trim()) return;
+    setBusy(true);
+    setError(null);
+    setResult(null);
+    try {
+      const res = await fetch("/api/document/diff", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          original: originalText,
+          modified: modifiedText,
+          locale,
+          analyzeLegalSignificance: analyzeLegal,
+        }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body?.error ?? `HTTP ${res.status}`);
+      setResult(body);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <p className="text-[13px] leading-relaxed text-slate-600">
+        두 버전의 문서를 업로드하면 줄·단어 단위로 차이점을 비교하고,
+        선택적으로 법적 변경의 의미(유리/불리/중립)까지 분석합니다.
+        <br />
+        <span className="text-slate-400">
+          Upload two versions of a document. The tool shows line- and
+          word-level differences side-by-side; the optional LLM analysis
+          interprets each change's legal significance (favorable / unfavorable /
+          neutral).
+        </span>
+      </p>
+
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+        {/* Original side */}
+        <DiffInput
+          label="원본 / Original"
+          filename={originalFilename}
+          text={originalText}
+          onText={setOriginalText}
+          onClearFilename={() => setOriginalFilename(null)}
+          onPickFile={onPickOriginal}
+        />
+        {/* Modified side */}
+        <DiffInput
+          label="수정본 / Modified"
+          filename={modifiedFilename}
+          text={modifiedText}
+          onText={setModifiedText}
+          onClearFilename={() => setModifiedFilename(null)}
+          onPickFile={onPickModified}
+        />
+      </div>
+
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <label className="inline-flex cursor-pointer items-center gap-2 text-[13px] text-slate-700">
+          <input
+            type="checkbox"
+            checked={analyzeLegal}
+            onChange={(e) => setAnalyzeLegal(e.target.checked)}
+            className="h-4 w-4 rounded border-slate-300"
+          />
+          법적 의미 분석 (LLM) / Analyze legal meaning
+        </label>
+        <button
+          type="button"
+          onClick={onCompare}
+          disabled={!originalText.trim() || !modifiedText.trim() || busy}
+          className={cn(
+            "inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-xs font-medium transition-colors",
+            !originalText.trim() || !modifiedText.trim() || busy
+              ? "bg-slate-200 text-slate-400"
+              : "bg-slate-900 text-white hover:bg-slate-800",
+          )}
+        >
+          {busy ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+          ) : (
+            <FileDiff className="h-3.5 w-3.5" aria-hidden />
+          )}
+          {busy ? "비교 중..." : "비교 / Compare"}
+        </button>
+      </div>
+
+      {error && (
+        <div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800">
+          {error}
+        </div>
+      )}
+
+      {result && <DiffResultView result={result} />}
+    </div>
+  );
+}
+
+function DiffInput({
+  label,
+  filename,
+  text,
+  onText,
+  onClearFilename,
+  onPickFile,
+}: {
+  label: string;
+  filename: string | null;
+  text: string;
+  onText: (s: string) => void;
+  onClearFilename: () => void;
+  onPickFile: (e: React.ChangeEvent<HTMLInputElement>) => void;
+}): React.ReactElement {
+  const id = React.useId();
+  return (
+    <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50/40 p-3">
+      <div className="flex items-center justify-between">
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+          {label}
+        </span>
+        <label
+          htmlFor={id}
+          className="inline-flex cursor-pointer items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium text-slate-500 hover:bg-slate-200 hover:text-slate-700"
+        >
+          <Paperclip className="h-3 w-3" aria-hidden />
+          파일 / File
+        </label>
+        <input
+          id={id}
+          type="file"
+          accept=".pdf,.docx,.txt"
+          hidden
+          onChange={onPickFile}
+        />
+      </div>
+      {filename && (
+        <div className="flex items-center gap-1.5 truncate rounded bg-white px-2 py-0.5 text-[11px] text-emerald-700">
+          📎 {filename}
+          <button
+            type="button"
+            onClick={() => {
+              onClearFilename();
+              onText("");
+            }}
+            className="ml-auto text-slate-400 hover:text-rose-600"
+          >
+            <X className="h-3 w-3" aria-hidden />
+          </button>
+        </div>
+      )}
+      <textarea
+        value={text}
+        onChange={(e) => onText(e.target.value)}
+        placeholder="텍스트를 붙여넣거나 파일을 업로드 / Paste text or upload file"
+        rows={8}
+        className="block w-full resize-y rounded border border-slate-200 bg-white px-2.5 py-2 text-[13px] text-slate-900 outline-none focus:border-slate-400"
+      />
+    </div>
+  );
+}
+
+async function readFileIntoState(
+  file: File,
+  setText: (s: string) => void,
+  setError: (s: string | null) => void,
+): Promise<void> {
+  setError(null);
+  try {
+    const formData = new FormData();
+    formData.append("files", file);
+    const res = await fetch("/api/upload", { method: "POST", body: formData });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      throw new Error(body?.error ?? `HTTP ${res.status}`);
+    }
+    const data = (await res.json()) as {
+      files: Array<{ text: string; warnings: string[] }>;
+    };
+    const text = data.files?.[0]?.text ?? "";
+    if (!text) throw new Error("No text could be extracted from the file.");
+    setText(text);
+  } catch (err) {
+    setError(err instanceof Error ? err.message : String(err));
+  }
+}
+
+function DiffResultView({
+  result,
+}: {
+  result: DiffResponse;
+}): React.ReactElement {
+  const { diff, analysis, analysisError } = result;
+  return (
+    <div className="space-y-4">
+      {/* Stats row */}
+      <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-[12px]">
+        <span className="font-medium text-slate-700">변경 요약 / Diff:</span>
+        <Stat label="동일" count={diff.stats.equalLines} color="text-slate-500" />
+        <Stat label="삭제" count={diff.stats.removedLines} color="text-rose-700" />
+        <Stat label="추가" count={diff.stats.addedLines} color="text-emerald-700" />
+        <Stat label="변경" count={diff.stats.changedLines} color="text-amber-700" />
+      </div>
+
+      {/* LLM analysis (if available) */}
+      {analysis && (
+        <div className="rounded-lg border border-indigo-200 bg-indigo-50/60 px-4 py-3">
+          <div className="mb-1 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-indigo-700">
+            <Info className="h-3.5 w-3.5" aria-hidden />
+            법적 의미 분석 / Legal Significance
+          </div>
+          <p className="mb-3 whitespace-pre-wrap text-[13px] leading-relaxed text-slate-800">
+            {analysis.overallAssessment}
+          </p>
+          <ul className="space-y-2">
+            {analysis.keyChanges.map((c, i) => (
+              <li
+                key={i}
+                className={cn(
+                  "rounded border bg-white p-2.5 text-[12px]",
+                  c.impact === "favorable" && "border-emerald-200",
+                  c.impact === "unfavorable" && "border-rose-200",
+                  c.impact === "neutral" && "border-slate-200",
+                )}
+              >
+                <div className="mb-1 flex items-center gap-2">
+                  <ImpactBadge impact={c.impact} />
+                  <span className="font-medium text-slate-900">
+                    {c.summary}
+                  </span>
+                </div>
+                <p className="text-[12px] leading-relaxed text-slate-700">
+                  {c.explanation}
+                </p>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {analysisError && (
+        <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          LLM 분석 실패 / Legal analysis failed: {analysisError}. The diff
+          below is still valid.
+        </div>
+      )}
+
+      {/* Side-by-side diff */}
+      <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+        <div className="grid grid-cols-2 border-b border-slate-200 bg-slate-50 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+          <span>원본 / Original</span>
+          <span>수정본 / Modified</span>
+        </div>
+        <div className="max-h-[60vh] overflow-y-auto font-mono text-[12px] leading-relaxed">
+          {diff.rows.map((row, i) => (
+            <DiffRowView key={i} row={row} />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DiffRowView({ row }: { row: DiffRow }): React.ReactElement {
+  if (row.kind === "equal") {
+    return (
+      <div className="grid grid-cols-2 border-b border-slate-100 last:border-b-0">
+        <CellEqual text={row.originalText ?? ""} />
+        <CellEqual text={row.modifiedText ?? ""} />
+      </div>
+    );
+  }
+  if (row.kind === "removed") {
+    return (
+      <div className="grid grid-cols-2 border-b border-slate-100 last:border-b-0 bg-rose-50/40">
+        <CellRemoved text={row.originalText ?? ""} />
+        <CellEmpty />
+      </div>
+    );
+  }
+  if (row.kind === "added") {
+    return (
+      <div className="grid grid-cols-2 border-b border-slate-100 last:border-b-0 bg-emerald-50/40">
+        <CellEmpty />
+        <CellAdded text={row.modifiedText ?? ""} />
+      </div>
+    );
+  }
+  // changed: side-by-side with inline word-level highlights
+  return (
+    <div className="grid grid-cols-2 border-b border-slate-100 last:border-b-0 bg-amber-50/40">
+      <CellInline inline={row.inlineLeft ?? []} side="left" />
+      <CellInline inline={row.inlineRight ?? []} side="right" />
+    </div>
+  );
+}
+
+function CellEqual({ text }: { text: string }) {
+  return (
+    <div className="border-r border-slate-100 px-3 py-1 text-slate-600 last:border-r-0">
+      {text || " "}
+    </div>
+  );
+}
+function CellRemoved({ text }: { text: string }) {
+  return (
+    <div className="border-r border-slate-100 bg-rose-50/60 px-3 py-1 text-rose-800 line-through decoration-rose-400 last:border-r-0">
+      {text || " "}
+    </div>
+  );
+}
+function CellAdded({ text }: { text: string }) {
+  return (
+    <div className="border-r border-slate-100 bg-emerald-50/70 px-3 py-1 text-emerald-900 last:border-r-0">
+      {text || " "}
+    </div>
+  );
+}
+function CellEmpty() {
+  return (
+    <div className="border-r border-slate-100 bg-slate-50/40 px-3 py-1 last:border-r-0">
+      <span className="text-slate-300">·</span>
+    </div>
+  );
+}
+function CellInline({
+  inline,
+  side,
+}: {
+  inline: Array<{ text: string; kind: "equal" | "removed" | "added" }>;
+  side: "left" | "right";
+}) {
+  return (
+    <div
+      className={cn(
+        "border-r border-slate-100 px-3 py-1 last:border-r-0",
+        side === "left" ? "bg-rose-50/40" : "bg-emerald-50/50",
+      )}
+    >
+      {inline.map((w, i) => (
+        <span
+          key={i}
+          className={cn(
+            w.kind === "removed" &&
+              "bg-rose-200/60 text-rose-900 line-through decoration-rose-500",
+            w.kind === "added" && "bg-emerald-200/70 text-emerald-900",
+          )}
+        >
+          {w.text}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function Stat({
+  label,
+  count,
+  color,
+}: {
+  label: string;
+  count: number;
+  color: string;
+}) {
+  return (
+    <span className={cn("inline-flex items-center gap-1", color)}>
+      <span>{label}</span>
+      <span className="font-semibold tabular-nums">{count}</span>
+    </span>
+  );
+}
+
+function ImpactBadge({
+  impact,
+}: {
+  impact: "favorable" | "unfavorable" | "neutral";
+}): React.ReactElement {
+  const config = {
+    favorable: {
+      bg: "bg-emerald-100 text-emerald-800",
+      label: "유리 / Favorable",
+    },
+    unfavorable: {
+      bg: "bg-rose-100 text-rose-800",
+      label: "불리 / Unfavorable",
+    },
+    neutral: { bg: "bg-slate-100 text-slate-700", label: "중립 / Neutral" },
+  }[impact];
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold",
+        config.bg,
+      )}
+    >
+      {config.label}
+    </span>
   );
 }
 
