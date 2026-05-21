@@ -527,14 +527,36 @@ function modelShortName(modelId: string): string {
   return resolveModel(modelId).displayName;
 }
 
+/** Minimal HTML escape so user-supplied text (model output, precedent
+ *  fields, attachment names) can't break the document structure. */
+function esc(s: string | undefined | null): string {
+  if (!s) return "";
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+/** Convert newlines in plain text into <br> for Word rendering. */
+function nl2br(s: string | undefined | null): string {
+  return esc(s).replace(/\n/g, "<br>");
+}
+
 /**
- * Build a markdown document from a single branch's answer and trigger
- * a browser download. The user can open the file in any editor, paste
- * into Word, or attach it to a brief.
+ * Build a Microsoft Word document from a single branch's answer and
+ * trigger a browser download. Uses the "HTML-as-Word" approach: we
+ * emit an HTML body with MSO-compatible markup and serve it as
+ * `application/msword` with a `.doc` extension. Word, 한컴 오피스, and
+ * Google Docs all open it natively as a rich-text document the user
+ * can edit and save-as-.docx if they want.
  *
- * Filename embeds the model name + a date stamp so multiple downloads
- * across models / sessions don't collide:
- *   law-agent_{model}_{YYYY-MM-DD}_{HH-MM}.md
+ * No new dependencies — pure client-side blob, no docx library
+ * required (would add ~600KB to the bundle for marginal quality gain).
+ *
+ * Filename pattern:
+ *   law-agent_{model}_{YYYY-MM-DD}_{HH-MM}.doc
  */
 function downloadBranchAnswer(turn: CaseTurn, branch: TurnBranch): void {
   const modelName = resolveModel(branch.modelId).displayName;
@@ -544,60 +566,104 @@ function downloadBranchAnswer(turn: CaseTurn, branch: TurnBranch): void {
   const now = new Date();
   const pad = (n: number) => n.toString().padStart(2, "0");
   const stamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_${pad(now.getHours())}-${pad(now.getMinutes())}`;
-  const filename = `law-agent_${sanitizedModel}_${stamp}.md`;
-
-  const sections: string[] = [
-    `# Law Agent — ${modelName}`,
-    "",
-    `**Generated:** ${now.toISOString()}`,
-    `**Question:** ${turn.question || "(none)"}`,
-  ];
-  if (turn.attachmentNames && turn.attachmentNames.length > 0) {
-    sections.push(`**Attachments:** ${turn.attachmentNames.join(", ")}`);
-  }
-  sections.push("", "## Summary", "", branch.summary ?? "(no summary)");
+  const filename = `law-agent_${sanitizedModel}_${stamp}.doc`;
 
   const matches = branch.matches ?? [];
-  if (matches.length > 0) {
-    sections.push("", "## Similar Precedents", "");
-    matches.forEach((m, i) => {
+
+  const matchBlocks = matches
+    .map((m, i) => {
       const p = m.precedent;
       const tier = m.citability ?? (m.citable ? "supporting" : "weak");
-      sections.push(
-        `### ${i + 1}. ${p.caseTitle}`,
-        "",
-        `- **Case number:** ${p.caseNumber}`,
-        `- **Court:** ${p.court}`,
-        `- **Decision date:** ${p.decisionDate}`,
-        `- **Citability:** ${tier}`,
-        `- **Final score:** ${Math.round(m.scores.final * 100)}%`,
-        "",
-        `**Holding (판시사항):** ${p.holding}`,
-        "",
-        `**Summary (판결요지):** ${p.summary}`,
-        "",
-        `**Why it matches:** ${m.whyMatches}`,
-        "",
-        "---",
-        "",
-      );
-    });
+      const tierClass = `citability-${tier}`;
+      const tierLabel =
+        tier === "strong"
+          ? "강한 권위 / Strong authority"
+          : tier === "supporting"
+            ? "참고 자료 / Supporting"
+            : "제한 적용 / Limited";
+      return `
+        <h3>${i + 1}. ${esc(p.caseTitle)}</h3>
+        <table>
+          <tr><th>Case number</th><td>${esc(p.caseNumber)}</td></tr>
+          <tr><th>Court</th><td>${esc(p.court)}</td></tr>
+          <tr><th>Decision date</th><td>${esc(p.decisionDate)}</td></tr>
+          <tr><th>Citability</th><td><span class="citability ${tierClass}">${tierLabel}</span></td></tr>
+          <tr><th>Final score</th><td>${Math.round(m.scores.final * 100)}%</td></tr>
+        </table>
+        <p><b>Holding (판시사항):</b><br>${nl2br(p.holding)}</p>
+        <p><b>Summary (판결요지):</b><br>${nl2br(p.summary)}</p>
+        <p><b>Why it matches:</b><br>${nl2br(m.whyMatches)}</p>
+      `;
+    })
+    .join("");
+
+  const elementsBlock =
+    branch.elements && branch.elements.coreIssue
+      ? `
+        <h2>Extracted Legal Elements</h2>
+        <pre>${esc(JSON.stringify(branch.elements, null, 2))}</pre>
+      `
+      : "";
+
+  // MSO namespace declarations + a small set of styles that Word
+  // (and 한컴) renders cleanly. Korean font fallback is included so
+  // CJK characters render correctly in Word on Windows / Mac.
+  const html = `<!DOCTYPE html>
+<html xmlns:o="urn:schemas-microsoft-com:office:office"
+      xmlns:w="urn:schemas-microsoft-com:office:word"
+      xmlns="http://www.w3.org/TR/REC-html40">
+<head>
+<meta charset="utf-8">
+<title>Law Agent — ${esc(modelName)}</title>
+<style>
+  @page { size: A4; margin: 1in; }
+  body { font-family: "Calibri", "Malgun Gothic", "맑은 고딕", sans-serif; font-size: 11pt; color: #1a1a1a; }
+  h1 { font-size: 22pt; margin: 0 0 6pt; color: #111; }
+  h2 { font-size: 14pt; margin: 18pt 0 6pt; color: #4f46e5; border-bottom: 1pt solid #ddd; padding-bottom: 4pt; }
+  h3 { font-size: 12pt; margin: 12pt 0 4pt; color: #333; }
+  p { margin: 0 0 8pt; line-height: 1.55; }
+  pre { background: #f8fafc; border: 1pt solid #e5e7eb; padding: 8pt; font-family: "Consolas", "맑은 고딕", monospace; font-size: 9.5pt; white-space: pre-wrap; }
+  .meta { color: #6b7280; font-size: 10pt; margin-bottom: 12pt; }
+  .meta-row { margin: 0 0 2pt; }
+  table { border-collapse: collapse; width: 100%; margin: 6pt 0 10pt; }
+  th, td { border: 1pt solid #d1d5db; padding: 5pt 8pt; text-align: left; vertical-align: top; font-size: 10.5pt; }
+  th { background: #f3f4f6; font-weight: bold; width: 28%; }
+  .citability { display: inline-block; padding: 2pt 8pt; border-radius: 999px; font-size: 9pt; font-weight: bold; }
+  .citability-strong { background: #d1fae5; color: #065f46; }
+  .citability-supporting { background: #fef3c7; color: #92400e; }
+  .citability-weak { background: #f3f4f6; color: #6b7280; }
+</style>
+</head>
+<body>
+  <h1>Law Agent — ${esc(modelName)}</h1>
+  <div class="meta">
+    <p class="meta-row"><b>Generated:</b> ${esc(now.toLocaleString())}</p>
+    <p class="meta-row"><b>Question:</b> ${esc(turn.question || "(none)")}</p>
+    ${
+      turn.attachmentNames && turn.attachmentNames.length > 0
+        ? `<p class="meta-row"><b>Attachments:</b> ${esc(turn.attachmentNames.join(", "))}</p>`
+        : ""
+    }
+  </div>
+
+  <h2>Summary</h2>
+  <p>${nl2br(branch.summary ?? "(no summary)")}</p>
+
+  ${
+    matches.length > 0
+      ? `<h2>Similar Precedents (${matches.length})</h2>${matchBlocks}`
+      : ""
   }
 
-  // Elements (if present and meaningful)
-  if (branch.elements && branch.elements.coreIssue) {
-    sections.push(
-      "",
-      "## Extracted Legal Elements",
-      "",
-      "```json",
-      JSON.stringify(branch.elements, null, 2),
-      "```",
-    );
-  }
+  ${elementsBlock}
+</body>
+</html>`;
 
-  const blob = new Blob([sections.join("\n")], {
-    type: "text/markdown;charset=utf-8",
+  // Word recognises this MIME + .doc extension as a Word document and
+  // opens it directly. The user can Save As .docx from Word's menu
+  // for the modern format.
+  const blob = new Blob([html], {
+    type: "application/msword;charset=utf-8",
   });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -606,7 +672,6 @@ function downloadBranchAnswer(turn: CaseTurn, branch: TurnBranch): void {
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
-  // Revoke after a tick so the browser has time to start the download.
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 

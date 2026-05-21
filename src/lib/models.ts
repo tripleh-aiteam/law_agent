@@ -108,11 +108,11 @@ export const MODEL_OPTIONS: ModelOption[] = [
   // don't draw from any paid credit pool.
   {
     id: "groq/openai/gpt-oss-120b",
-    displayName: "GPT-OSS 120B",
+    displayName: "Open GPT 120B",
     family: "groq",
     tier: "premium",
     description:
-      "FREE — OpenAI's open-weight 120B flagship via Groq. Strong reasoning + reliable JSON. The most powerful free model. No per-query cost.",
+      "FREE — OpenAI's open-weight 120B model (released under an open license — distinct from the paid ChatGPT models above). Strong reasoning + reliable JSON. The most powerful free model. No per-query cost.",
     korean: 3,
   },
   {
