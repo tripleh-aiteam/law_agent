@@ -2,7 +2,13 @@
 
 import * as React from "react";
 import { useLocale, useTranslations } from "next-intl";
-import { Building2, Globe, Settings2, ShieldOff } from "lucide-react";
+import {
+  Building2,
+  FileWarning,
+  Globe,
+  Settings2,
+  ShieldOff,
+} from "lucide-react";
 
 import { useCases } from "@/components/cases/cases-context";
 import { ModelSelector } from "@/components/layout/model-selector";
@@ -81,8 +87,18 @@ export function Header() {
         )}
       </div>
       <div className="flex items-center gap-1.5">
-        {/* Tool quick-actions — not tied to the conversation, no LLM cost
-            for the regex-only redact mode + free NTS API for biz lookup. */}
+        {/* Tool quick-actions — utility tools that don't belong in the
+            conversation flow (PII redact, business lookup, contract review). */}
+        <button
+          type="button"
+          onClick={() => setActiveTool("contract-redline")}
+          className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-100"
+          title="📋 계약서 검토 / Auto-redline contract per Korean law"
+          aria-label="Contract redline"
+        >
+          <FileWarning className="h-3.5 w-3.5 text-slate-500" aria-hidden />
+          계약서
+        </button>
         <button
           type="button"
           onClick={() => setActiveTool("redact")}
