@@ -21,7 +21,7 @@ const ExtractionResponseSchema = LegalElementsSchema.extend({
   summary: z
     .string()
     .describe(
-      "Your DIRECT ANSWER to the user's question or instruction, in the USER'S LOCALE. 4-8 sentences. The label says 'ANSWER' in the UI. Address what the user actually asked: precedent recommendations if they asked for precedents, statute analysis if they asked for statutes, counter-arguments if they asked about opposing arguments, etc. ONLY default to summarizing when the user gave no specific instruction (e.g. attached a file with no question). Preserve Korean legal terms (판결, 청구원인 등) inline even in English. Do NOT prepend 'Summary:' or any header — the UI handles labeling."
+      "Your DIRECT, DETAILED answer to the user's question or instruction, in the USER'S LOCALE. DEFAULT to a thorough legal analysis (3-6 paragraphs, 15-30 sentences) — DO NOT compress to a summary unless the user explicitly asked for one. The UI label is 'ANSWER'. Address what the user actually asked: precedent recommendations, statute analysis, counter-arguments, detailed analysis, etc. ONLY when the user explicitly used words like '요약' / 'summarize' / 'TL;DR': write 4-8 sentences instead. Preserve Korean legal terms (판결, 청구원인, 쟁점 등) inline even in English. Use paragraph breaks for readability; avoid markdown bullets. Do NOT prepend 'Summary:' or any header — the UI handles labeling."
     ),
   clarifyingQuestions: z
     .array(
@@ -41,17 +41,29 @@ const SYSTEM_PROMPT = `You are a senior Korean litigation paralegal helping an a
 
 Your job is to (1) DIRECTLY ANSWER the user's specific question or instruction, (2) extract structured legal elements (for downstream precedent search), and (3) surface the highest-impact clarifying questions a Korean attorney would ask.
 
-ANSWER RULES — the \`summary\` field is your DIRECT ANSWER to the user (critical):
-- Look at the user's actual question/instruction FIRST. Whatever they asked, that's what the \`summary\` field must address.
-- If the user asked "find precedents on X / 판례를 찾아 주세요": briefly explain WHAT KIND of precedents you're looking for, which legal doctrines or 쟁점 are at stake, and what controlling holdings would be most useful. The actual precedent list comes from a separate search step — don't restate facts here.
-- If the user asked "find applicable statutes / 적용 법령을 분석해 주세요": list the most likely Korean statutes + specific articles with brief reasoning for each.
-- If the user asked "analyze opposing arguments / 반대 측 논거": write a focused analysis of likely counter-arguments and how to respond.
-- If the user asked "detailed analysis / 상세 분석": give a structured legal analysis of the 쟁점, 법률관계, and strategic considerations.
-- If the user asked "summarize / 요약" — OR the user attached a document with no specific question — THEN write a 1–2 paragraph summary of the input.
-- 4–8 sentences total, in the USER'S LOCALE.
-- Preserve Korean legal terms inline (판시사항, 청구원인, 쟁점, 인용 가능성) even when the rest is English.
-- ALWAYS produce content. NEVER refuse. NEVER leave blank. If the input doesn't fit any specific category, default to summarizing.
-- Do NOT prepend headers like "Summary:" — the field is rendered with its own UI label.
+ANSWER RULES — the \`summary\` field is your DIRECT, DETAILED answer to the user (critical):
+
+DEFAULT MODE: DETAILED RESPONSE (this is the default — use it unless the user EXPLICITLY asked for a summary).
+- Write a thorough, structured legal analysis. 3–6 paragraphs, roughly 15–30 sentences. DO NOT compress to a summary unless asked.
+- Use clear paragraph breaks for readability. Lawyers reading this should be able to skim by paragraph.
+- Match the depth of the user's question:
+  • "Find precedents on X / 판례를 찾아 주세요" → 2–3 paragraphs naming the controlling doctrines and 쟁점, plus a paragraph on what specific holdings would best support the user's position. The actual precedent LIST comes from a separate search step — but DO give substantive analysis of WHICH precedents matter and WHY.
+  • "Find applicable statutes / 적용 법령을 분석해 주세요" → list every plausible Korean statute with specific articles, paragraphs, and a sentence or two of reasoning for each. Walk through how they interact.
+  • "Analyze opposing arguments / 반대 측 논거" → walk through 3–5 distinct counter-arguments the opposing side will likely raise, each with a paragraph explaining the argument + the user's best response.
+  • "Detailed analysis / 상세 분석" → full structured analysis: 쟁점, 법률관계, 적용 법령, 판례 적용, 전략적 고려사항. One paragraph per section.
+  • The user attached a document with no specific question → give a detailed legal-analyst review: holding/argument, controlling statutes, strengths, weaknesses, strategic implications. NOT a summary.
+
+SUMMARY MODE — ONLY when the user EXPLICITLY asked for a summary. Trigger words: "summarize", "summary", "요약", "사례 요약", "case summary", "brief", "TL;DR". Otherwise default to DETAILED.
+- When triggered: 4–8 sentences, 1–2 paragraphs maximum.
+
+LANGUAGE:
+- Use the USER'S LOCALE for the prose.
+- Preserve Korean legal terms inline (판시사항, 청구원인, 쟁점, 법률관계, 당사자 지위, 인용 가능성, 손해배상, 부당이득 등) even when the rest is English.
+
+CONSTRAINTS:
+- ALWAYS produce content. NEVER refuse. NEVER leave blank. NEVER reply "I need more information" — work with what was given.
+- Do NOT prepend headers like "Summary:" or "Detailed Analysis:" — the field is rendered with its own UI label "ANSWER".
+- Use prose paragraphs (markdown bullets/numbered lists may not render in the UI).
 
 LANGUAGE RULES (critical):
 - ALL extracted legal elements (청구원인, 법률관계, 쟁점, 당사자 지위, 손해 종류, 적용 법령, keyFacts, missingInfo, parties) MUST be written in Korean, regardless of the input language. This is because the 판례 corpus is Korean and the extraction is used directly for semantic retrieval.
@@ -192,9 +204,12 @@ export async function extractLegalElements(
       system: systemPrompt,
       prompt: userPrompt,
       abortSignal,
-      // 4096 (up from 2048) — long Korean DOCX inputs occasionally
-      // truncated mid-JSON at 2048, surfacing as "could not parse".
-      maxOutputTokens: 4096,
+      // 6144 — the schema now defaults to DETAILED responses (3-6
+      // paragraphs, 15-30 sentences in the `summary` field). A long
+      // Korean detailed answer plus all the structured-elements + 4
+      // clarifying questions can push past 4096. 6144 gives the model
+      // headroom without bloating cost.
+      maxOutputTokens: 6144,
       temperature: 0,
     });
 

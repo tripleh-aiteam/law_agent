@@ -179,8 +179,19 @@ function directKeyEnvVar(family: string | undefined): string | undefined {
  */
 function buildManusPrompt(narrative: string, locale: "ko" | "en"): string {
   const isKo = locale === "ko";
+  // Same default-detailed rule as the other LLMs (extractor.ts SYSTEM_PROMPT).
+  // Manus's lite profile follows natural-language instructions, so a short
+  // hint up front sets the response depth.
   const hint = isKo
-    ? "한국 법률 자문 맥락에서의 질문입니다. 한국 법률 용어(쟁점, 청구원인, 판시사항 등)는 그대로 유지하고, 한국어로 간결하게 답해 주세요."
-    : "This is a Korean legal advice context. Preserve Korean legal terms (쟁점, 청구원인, 판시사항 etc.) inline. Answer concisely.";
+    ? `한국 법률 자문 맥락에서의 질문입니다. 답변 규칙:
+- 기본: 변호사가 사용할 수 있는 상세하고 구조화된 법률 분석을 작성합니다 (3–6 단락, 15–30 문장). 짧은 요약으로 줄이지 마세요.
+- 예외: 사용자가 명시적으로 "요약" / "summarize" / "TL;DR" 등을 요청한 경우에만 4–8 문장의 짧은 요약으로 답합니다.
+- 한국 법률 용어(쟁점, 청구원인, 판시사항, 법률관계, 인용 가능성 등)는 영어 답변에서도 그대로 유지합니다.
+- 가독성을 위해 단락 구분을 사용하되, markdown bullet 목록은 피하고 산문 형식으로 작성합니다.`
+    : `This is a Korean legal advice context. Response rules:
+- DEFAULT: write a detailed, structured legal analysis a lawyer can actually use (3–6 paragraphs, 15–30 sentences). Do NOT compress to a summary unless asked.
+- EXCEPTION: only when the user explicitly asks for a summary ('summarize', '요약', 'TL;DR'), give a 4–8 sentence short summary instead.
+- Preserve Korean legal terms (쟁점, 청구원인, 판시사항, 법률관계, 인용 가능성 etc.) inline even in English.
+- Use clear paragraph breaks; avoid markdown bullets — write in prose form.`;
   return `${hint}\n\n---\n\n${narrative.trim()}`;
 }
