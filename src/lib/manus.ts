@@ -26,19 +26,18 @@ const GET_TASK_PATH = (id: string) => `/v1/tasks/${encodeURIComponent(id)}`;
 /** How often we poll while the task is running (ms). */
 const POLL_INTERVAL_MS = 2_000;
 /**
- * Hard ceiling on polling. 3 min covers real Manus research tasks
- * (which can take 60-150s for substantial legal queries). Previously
- * 90s was too tight and was bailing on tasks that were genuinely
- * still producing the final answer.
+ * Hard ceiling on polling. 4 min covers real Manus research tasks
+ * producing the new 8-paragraph mandatory legal memorandum (which
+ * Manus lite can take 90-180s to write end-to-end in Korean).
+ * Previously 180s was bailing on tasks that were genuinely still
+ * producing the long required output.
  */
-const POLL_MAX_MS = 180_000;
+const POLL_MAX_MS = 240_000;
 /**
  * If Manus is stuck in an "awaiting user input" state we want to bail
  * early — but ONLY when the assistant's last message clearly looks
  * like a clarification request (not just an intermediate "I'll get
- * back to you" placeholder). Old logic triggered on any assistant
- * text after 45s, which prematurely returned "잠시만 기다려 주십시오"
- * as if it were the final answer.
+ * back to you" placeholder).
  */
 const EARLY_EXTRACT_AFTER_MS = 90_000;
 

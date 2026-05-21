@@ -234,15 +234,17 @@ export async function extractLegalElements(
       system: systemPrompt,
       prompt: userPrompt,
       abortSignal,
-      // 12288 — the schema now mandates VERY DETAILED responses (≥8
-      // paragraphs, ≥50 sentences, ≥2.5k Korean chars / 3.5k English
-      // chars in the `summary` field) plus the structured-elements
-      // payload + clarifying questions. A full Korean legal memorandum
-      // at the new minimum easily uses 5–7k tokens just for the
-      // `summary` field; 12288 gives every model adequate headroom
-      // to avoid mid-JSON truncation (which Groq surfaces as "Failed
-      // to generate JSON").
-      maxOutputTokens: 12288,
+      // 8192 — capped at Groq's max_tokens ceiling for Llama 4 Scout
+      // (which rejects anything above 8192 with an error pointing at
+      // the model's context_window limit). 8192 still comfortably
+      // fits the 7-section memorandum target:
+      //   - 2,500 Korean chars summary ≈ 3,500 tokens
+      //   - Structured elements + 4 clarifying questions ≈ 800 tokens
+      //   - JSON overhead ≈ 200 tokens
+      //   - Total worst case ≈ 6,500 tokens with 1,700 token headroom.
+      // Other providers (Claude / GPT / Gemini) could go higher but
+      // we keep the same limit across the board for consistency.
+      maxOutputTokens: 8192,
       temperature: 0,
     });
 
