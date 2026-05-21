@@ -97,12 +97,17 @@ function TierBadge({
 /* -------------------------------------------------------------------------- */
 
 const DROPDOWN_WIDTH = 320;
+const INTERACTION_KEY = "law-agent:modelSelectorPicked";
 
 export function ModelSelector(): React.ReactElement {
   const tHeader = useTranslations("header");
   const locale = useLocale() as "ko" | "en";
   const { selectedModelIds, toggleSelectedModel } = useCases();
   const [open, setOpen] = React.useState(false);
+  // Track whether the user has actively picked a model. Until they do,
+  // the button shows a generic "Choose LLM" label so people can find it
+  // (more discoverable than showing a defaulted model name).
+  const [hasPicked, setHasPicked] = React.useState(false);
   const [pos, setPos] = React.useState<{
     top: number;
     right: number;
@@ -130,7 +135,30 @@ export function ModelSelector(): React.ReactElement {
 
   React.useEffect(() => {
     setMounted(true);
+    try {
+      if (localStorage.getItem(INTERACTION_KEY) === "1") setHasPicked(true);
+    } catch {
+      // localStorage may be unavailable (SSR / private mode) — fall back
+      // to "not picked yet" which still renders the discoverable label.
+    }
   }, []);
+
+  const markPicked = React.useCallback(() => {
+    setHasPicked(true);
+    try {
+      localStorage.setItem(INTERACTION_KEY, "1");
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const onToggleModel = React.useCallback(
+    (id: string) => {
+      markPicked();
+      toggleSelectedModel(id);
+    },
+    [markPicked, toggleSelectedModel],
+  );
 
   const recomputePosition = React.useCallback(() => {
     const btn = buttonRef.current;
@@ -177,17 +205,22 @@ export function ModelSelector(): React.ReactElement {
     };
   }, [open]);
 
-  // Label for the button — show selection count + summary.
+  // Label for the button:
+  //  - Until the user actively picks a model, show a generic
+  //    "Choose LLM" / "LLM 선택" so the control is discoverable
+  //  - After picking 1 → show the model's displayName
+  //  - After picking 2+ → show "Comparing N models"
   const labelText = React.useMemo(() => {
+    if (!hasPicked) return tHeader("modelSelectorInitial");
     if (selectedModelIds.length === 1) {
       return resolveModel(selectedModelIds[0]).displayName;
     }
     return tHeader("modelSelectorMultiLabel", {
       count: selectedModelIds.length,
     });
-  }, [selectedModelIds, tHeader]);
+  }, [hasPicked, selectedModelIds, tHeader]);
 
-  const isMulti = selectedModelIds.length >= 2;
+  const isMulti = hasPicked && selectedModelIds.length >= 2;
 
   const menu = open && pos && (
     <div
@@ -234,7 +267,7 @@ export function ModelSelector(): React.ReactElement {
                   type="button"
                   role="option"
                   aria-selected={selected}
-                  onClick={() => toggleSelectedModel(opt.id)}
+                  onClick={() => onToggleModel(opt.id)}
                   disabled={isLastSelected}
                   title={
                     isLastSelected

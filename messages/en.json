@@ -204,6 +204,17 @@
     "modelSelectorHint": "Affects analysis quality. Premium models reason more precisely about Korean legal nuance.",
     "modelSelectorMultiHint": "Pick multiple models to run in parallel. Each answers independently — you compare the tabs and pick the best.",
     "modelSelectorMultiLabel": "Comparing {count} models",
-    "modelSelectorSelected": "{count} selected"
+    "modelSelectorSelected": "{count} selected",
+    "modelSelectorInitial": "Choose LLM",
+    "toolCivilDraft": "Court draft",
+    "toolCivilDraftTitle": "⚖️ Civil complaint / answer drafter",
+    "toolContractRedline": "Contract",
+    "toolContractRedlineTitle": "📋 Contract redline / auto-flag under Korean law",
+    "toolDocumentDiff": "Compare",
+    "toolDocumentDiffTitle": "📑 Document comparison / side-by-side diff",
+    "toolPiiRedact": "PII",
+    "toolPiiRedactTitle": "🔒 Auto-redact personal info",
+    "toolBusinessLookup": "Biz lookup",
+    "toolBusinessLookupTitle": "🏢 Verify 사업자등록번호 with NTS"
   }
 }

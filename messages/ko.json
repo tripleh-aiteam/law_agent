@@ -204,6 +204,17 @@
     "modelSelectorHint": "분석 품질에 영향을 줍니다. Premium 모델일수록 한국어 법률 추론이 정교합니다.",
     "modelSelectorMultiHint": "여러 모델을 선택하면 각 모델이 동시에 답하고, 사용자가 직접 최고 답을 고를 수 있습니다.",
     "modelSelectorMultiLabel": "{count}개 모델 비교",
-    "modelSelectorSelected": "{count}개 선택됨"
+    "modelSelectorSelected": "{count}개 선택됨",
+    "modelSelectorInitial": "LLM 선택",
+    "toolCivilDraft": "소장",
+    "toolCivilDraftTitle": "⚖️ 소장 / 답변서 작성",
+    "toolContractRedline": "계약서",
+    "toolContractRedlineTitle": "📋 계약서 검토 / 한국법 기준 자동 첨삭",
+    "toolDocumentDiff": "비교",
+    "toolDocumentDiffTitle": "📑 문서 비교 / 두 버전 차이 분석",
+    "toolPiiRedact": "PII",
+    "toolPiiRedactTitle": "🔒 PII 자동 제거 / 개인정보 마스킹",
+    "toolBusinessLookup": "사업자",
+    "toolBusinessLookupTitle": "🏢 사업자등록번호 조회 / 국세청 확인"
   }
 }
