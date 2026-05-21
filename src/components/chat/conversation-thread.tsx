@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronUp,
+  Download,
   Loader2,
   Paperclip,
   Sparkles,
@@ -398,33 +399,44 @@ function BranchBody({
 
   return (
     <div className="space-y-3">
-      {/* Summary card with "mark best" button */}
+      {/* Summary card with "mark best" + "download" buttons */}
       {branch.summary && (
         <div className="rounded-2xl rounded-tl-md border border-slate-200 bg-white px-4 py-3.5 text-[14px] leading-relaxed text-slate-800 shadow-sm">
           <div className="mb-1.5 flex items-center justify-between gap-3">
             <div className="text-[11px] font-semibold uppercase tracking-wide text-indigo-600">
               {modelShortName(branch.modelId)} · {t("answerSummary")}
             </div>
-            <button
-              type="button"
-              onClick={() =>
-                currentCaseId &&
-                setBestBranch(currentCaseId, turn.id, branch.modelId)
-              }
-              className={cn(
-                "inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium transition-colors",
-                isBest
-                  ? "bg-amber-100 text-amber-800 hover:bg-amber-200"
-                  : "text-slate-500 hover:bg-slate-100 hover:text-amber-700",
-              )}
-              title={isBest ? t("unmarkBest") : t("markBest")}
-            >
-              <Star
-                className={cn("h-3 w-3", isBest && "fill-amber-500")}
-                aria-hidden
-              />
-              {isBest ? t("bestAnswer") : t("markBest")}
-            </button>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => downloadBranchAnswer(turn, branch)}
+                className="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium text-slate-500 transition-colors hover:bg-slate-100 hover:text-indigo-700"
+                title={t("downloadTooltip")}
+              >
+                <Download className="h-3 w-3" aria-hidden />
+                {t("download")}
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  currentCaseId &&
+                  setBestBranch(currentCaseId, turn.id, branch.modelId)
+                }
+                className={cn(
+                  "inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium transition-colors",
+                  isBest
+                    ? "bg-amber-100 text-amber-800 hover:bg-amber-200"
+                    : "text-slate-500 hover:bg-slate-100 hover:text-amber-700",
+                )}
+                title={isBest ? t("unmarkBest") : t("markBest")}
+              >
+                <Star
+                  className={cn("h-3 w-3", isBest && "fill-amber-500")}
+                  aria-hidden
+                />
+                {isBest ? t("bestAnswer") : t("markBest")}
+              </button>
+            </div>
           </div>
           <p className="whitespace-pre-wrap">{branch.summary}</p>
         </div>
@@ -513,6 +525,89 @@ function LegacyAnswerBody({ turn }: { turn: CaseTurn }): React.ReactElement {
 function modelShortName(modelId: string): string {
   // Use the registry's displayName so the tab matches the selector.
   return resolveModel(modelId).displayName;
+}
+
+/**
+ * Build a markdown document from a single branch's answer and trigger
+ * a browser download. The user can open the file in any editor, paste
+ * into Word, or attach it to a brief.
+ *
+ * Filename embeds the model name + a date stamp so multiple downloads
+ * across models / sessions don't collide:
+ *   law-agent_{model}_{YYYY-MM-DD}_{HH-MM}.md
+ */
+function downloadBranchAnswer(turn: CaseTurn, branch: TurnBranch): void {
+  const modelName = resolveModel(branch.modelId).displayName;
+  const sanitizedModel = modelName
+    .replace(/[^A-Za-z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  const now = new Date();
+  const pad = (n: number) => n.toString().padStart(2, "0");
+  const stamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_${pad(now.getHours())}-${pad(now.getMinutes())}`;
+  const filename = `law-agent_${sanitizedModel}_${stamp}.md`;
+
+  const sections: string[] = [
+    `# Law Agent — ${modelName}`,
+    "",
+    `**Generated:** ${now.toISOString()}`,
+    `**Question:** ${turn.question || "(none)"}`,
+  ];
+  if (turn.attachmentNames && turn.attachmentNames.length > 0) {
+    sections.push(`**Attachments:** ${turn.attachmentNames.join(", ")}`);
+  }
+  sections.push("", "## Summary", "", branch.summary ?? "(no summary)");
+
+  const matches = branch.matches ?? [];
+  if (matches.length > 0) {
+    sections.push("", "## Similar Precedents", "");
+    matches.forEach((m, i) => {
+      const p = m.precedent;
+      const tier = m.citability ?? (m.citable ? "supporting" : "weak");
+      sections.push(
+        `### ${i + 1}. ${p.caseTitle}`,
+        "",
+        `- **Case number:** ${p.caseNumber}`,
+        `- **Court:** ${p.court}`,
+        `- **Decision date:** ${p.decisionDate}`,
+        `- **Citability:** ${tier}`,
+        `- **Final score:** ${Math.round(m.scores.final * 100)}%`,
+        "",
+        `**Holding (판시사항):** ${p.holding}`,
+        "",
+        `**Summary (판결요지):** ${p.summary}`,
+        "",
+        `**Why it matches:** ${m.whyMatches}`,
+        "",
+        "---",
+        "",
+      );
+    });
+  }
+
+  // Elements (if present and meaningful)
+  if (branch.elements && branch.elements.coreIssue) {
+    sections.push(
+      "",
+      "## Extracted Legal Elements",
+      "",
+      "```json",
+      JSON.stringify(branch.elements, null, 2),
+      "```",
+    );
+  }
+
+  const blob = new Blob([sections.join("\n")], {
+    type: "text/markdown;charset=utf-8",
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  // Revoke after a tick so the browser has time to start the download.
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 /**

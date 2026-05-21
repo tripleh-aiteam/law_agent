@@ -473,10 +473,20 @@ export function ChatInput() {
     abortRef.current?.abort();
   };
 
-  const onSend = async () => {
-    const questionText = value.trim();
+  /**
+   * Fire the extract + search pipeline against the currently-selected
+   * models. By default it uses whatever the user has typed in the
+   * textarea, but the action chips can pass an `overrideQuestion` to
+   * fire a chip-specific prompt without first mutating textarea state
+   * (which would be a stale-closure race in React).
+   */
+  const onSend = async (overrideQuestion?: string) => {
+    const questionText = (overrideQuestion ?? value).trim();
     const snapshotAttachments = attachments;
-    const narrative = buildNarrative(value, snapshotAttachments);
+    const narrative = buildNarrative(
+      overrideQuestion ?? value,
+      snapshotAttachments,
+    );
     if (!narrative) return;
     if (selectedModelIds.length === 0) return;
 
@@ -574,6 +584,47 @@ export function ChatInput() {
       if (canSend) onSend();
     }
   };
+
+  /**
+   * Action chip handler — fires the send pipeline IMMEDIATELY when the
+   * case has enough context for the chip's prompt to make sense:
+   *  - a ready attachment (the chip acts on that file), OR
+   *  - a previously-completed turn (the chip acts as a follow-up), OR
+   *  - already-typed text in the textarea (the chip refines that)
+   *
+   * Otherwise — brand-new case with no input yet — it falls back to
+   * the old behavior of inserting the prompt into the textarea so the
+   * user can add their case facts and Send when ready.
+   *
+   * IMPORTANT: when firing immediately, we bypass React state by passing
+   * the prompt directly into onSend() — avoiding a stale-closure race
+   * with setValue().
+   */
+  const handleChipAction = React.useCallback(
+    (prompt: string) => {
+      const hasContext =
+        hasReadyAttachments || hasPriorTurns || value.trim().length > 0;
+      if (hasContext && !isSending && selectedModelIds.length > 0) {
+        // Clear the textarea so the user sees the chip's prompt take
+        // over (it'll show in the Q bubble of the new turn).
+        setValue("");
+        void onSend(prompt);
+      } else {
+        // No context — fall back to prefix-into-textarea so the user can
+        // type their case facts before sending.
+        replaceWithPrefix(prompt);
+      }
+    },
+    [
+      hasReadyAttachments,
+      hasPriorTurns,
+      value,
+      isSending,
+      selectedModelIds,
+      onSend,
+      replaceWithPrefix,
+    ],
+  );
 
   return (
     <div className="space-y-3">
@@ -729,7 +780,7 @@ export function ChatInput() {
             ) : (
               <button
                 type="button"
-                onClick={onSend}
+                onClick={() => onSend()}
                 disabled={!canSend}
                 className={cn(
                   "inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-medium transition-colors",
@@ -758,7 +809,7 @@ export function ChatInput() {
         </div>
       )}
 
-      <ActionChips onSelect={replaceWithPrefix} />
+      <ActionChips onAction={handleChipAction} />
     </div>
   );
 }

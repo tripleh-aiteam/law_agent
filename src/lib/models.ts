@@ -61,11 +61,11 @@ export const MODEL_OPTIONS: ModelOption[] = [
   // same model Manus uses under the hood. Re-add Opus later if needed.
   {
     id: "anthropic/claude-sonnet-4.6",
-    displayName: "Claude Sonnet 4.6 (Manus)",
+    displayName: "Claude Sonnet 4.6",
     family: "anthropic",
     tier: "premium",
     description:
-      "The same model Manus AI uses under the hood. Excellent Korean legal handling. Now the default Claude model. ~$0.05/query.",
+      "Excellent Korean legal handling. The same model Manus AI uses under the hood. Default Claude model. ~$0.05/query.",
     korean: 5,
   },
 

@@ -164,28 +164,35 @@
     "markBest": "Mark as best",
     "unmarkBest": "Unmark",
     "bestAnswer": "★ Best answer",
+    "download": "Download",
+    "downloadTooltip": "Download this model's answer as a Markdown (.md) file. Open in Word / Google Docs, or attach to a brief.",
     "manusSlowHint": "Manus is an autonomous agent — it browses the web + runs multi-step reasoning. Unlike a regular LLM, this can take 5–30 minutes."
   },
   "chips": {
     "summarize": {
       "label": "Case summary",
-      "prompt": "Please summarize the following case: "
+      "tooltip": "One click runs a case-facts summary on the current case / attached files.",
+      "prompt": "Summarize the facts and key issues of this case."
     },
     "analyze": {
       "label": "Detailed analysis",
-      "prompt": "Please analyze the legal issues in the following case in depth: "
+      "tooltip": "One click runs an in-depth legal-issues analysis.",
+      "prompt": "Analyze the legal issues, applicable statutes, and party relationships in this case in depth."
     },
     "precedents": {
       "label": "Citable precedents",
-      "prompt": "Please find Korean Supreme Court precedents that could be cited for this case: "
+      "tooltip": "One click finds citable Korean Supreme Court precedents.",
+      "prompt": "Find Korean Supreme Court precedents that could be cited for this case and assess their citability."
     },
     "counter": {
       "label": "Opposing arguments",
-      "prompt": "Please analyze the counter-arguments the opposing party is likely to raise in this case: "
+      "tooltip": "One click analyzes the opposing party's likely counter-arguments.",
+      "prompt": "Analyze the counter-arguments the opposing party is likely to raise and outline responses."
     },
     "statutes": {
       "label": "Applicable statutes",
-      "prompt": "Please analyze the statutes (and specific articles) that may apply to this case: "
+      "tooltip": "One click analyzes applicable statutes and articles.",
+      "prompt": "Identify the statutes and specific articles that apply to this case."
     }
   },
   "header": {
