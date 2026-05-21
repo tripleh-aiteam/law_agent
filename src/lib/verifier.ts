@@ -57,28 +57,48 @@ export async function verifyCitation(caseNumber: string): Promise<boolean> {
   }
 
   // ── Step 2: case is NOT in our snapshot — try law.go.kr live. ──────
-  // law.go.kr open API pattern. We use `prec` (판례) target with JSON output.
+  // Two routing options:
+  //   (a) LAWGO_PROXY_URL + LAWGO_PROXY_TOKEN set → route through the
+  //       user's Korean cloud proxy (AWS Seoul VM). Required for
+  //       Vercel deployments because the Korean Ministry of Justice
+  //       firewall blocks foreign IPs.
+  //   (b) Neither proxy var set → call law.go.kr direct. Works only
+  //       from a Korean IP (local dev in Korea, or a Vercel Static IP
+  //       in icn1 region registered with open.law.go.kr).
   //
-  // HTTP (not HTTPS): law.go.kr's HTTPS configuration is broken — the TLS
-  // handshake silently fails from many clients (Node fetch, curl SSL on
-  // Windows). HTTP works reliably. The Open API doesn't transmit credentials
-  // (the OC value is public-ish and rotates IP-bound), so HTTP is acceptable.
+  // law.go.kr is HTTP-only (their HTTPS handshake is broken on many
+  // clients) and the Open API uses `OC=<key>` as a public-ish
+  // IP-bound credential, so HTTP is acceptable.
   //
   // Parameter notes:
   //   - `query=<text>`  : the actual search text (case number, title, etc.)
   //   - `search=<int>`  : search-mode code (1=title, 2=case number) — NOT the
   //                       search text! Sending the case number under `search`
   //                       returns law.go.kr's generic error page.
-  const url =
-    `http://www.law.go.kr/DRF/lawSearch.do?` +
+  const proxyUrl = process.env.LAWGO_PROXY_URL?.trim();
+  const proxyToken = process.env.LAWGO_PROXY_TOKEN?.trim();
+
+  const upstreamPath =
+    `lawSearch.do?` +
     `OC=${encodeURIComponent(apiKey)}` +
     `&target=prec&type=JSON&query=${encodeURIComponent(key)}`;
+
+  const url = proxyUrl
+    ? // Hit the Korean-IP proxy. The proxy strips /lawgo/ and prepends
+      // /DRF on its side, so we just append the path.
+      `${proxyUrl.replace(/\/$/, "")}/lawgo/${upstreamPath}`
+    : `http://www.law.go.kr/DRF/${upstreamPath}`;
+
+  const headers: Record<string, string> = {};
+  if (proxyUrl && proxyToken) {
+    headers["Authorization"] = `Bearer ${proxyToken}`;
+  }
 
   try {
     const resp = await fetch(url, {
       method: "GET",
+      headers,
       signal: AbortSignal.timeout(VERIFY_TIMEOUT_MS),
-      // Open API doesn't need credentials; avoid sending any.
     });
     if (!resp.ok) {
       verificationCache.set(key, false);
