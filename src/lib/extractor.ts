@@ -21,7 +21,7 @@ const ExtractionResponseSchema = LegalElementsSchema.extend({
   summary: z
     .string()
     .describe(
-      "Your DIRECT, DETAILED answer to the user's question or instruction, in the USER'S LOCALE. DEFAULT to a thorough legal analysis (3-6 paragraphs, 15-30 sentences) — DO NOT compress to a summary unless the user explicitly asked for one. The UI label is 'ANSWER'. Address what the user actually asked: precedent recommendations, statute analysis, counter-arguments, detailed analysis, etc. ONLY when the user explicitly used words like '요약' / 'summarize' / 'TL;DR': write 4-8 sentences instead. Preserve Korean legal terms (판결, 청구원인, 쟁점 등) inline even in English. Use paragraph breaks for readability; avoid markdown bullets. Do NOT prepend 'Summary:' or any header — the UI handles labeling."
+      "Your DIRECT, COMPREHENSIVE answer to the user's question, in the USER'S LOCALE. DEFAULT to a memorandum-style legal analysis (6-10 substantial paragraphs, 30-60 sentences total) — DO NOT compress unless the user explicitly asked for a summary. The UI label is 'ANSWER'. Be thorough: name doctrines, cite specific Korean statute articles, walk through legal reasoning, address counter-arguments, identify procedural / 시효 / 입증책임 issues where relevant. ONLY when the user explicitly used '요약' / 'summarize' / 'TL;DR' / 'brief' / 'Case summary': write 4-8 sentences instead. Preserve Korean legal terms (판결, 청구원인, 쟁점, 법률관계, 손해배상, 부당이득, 인용 가능성 등) inline even when answering in English. Use paragraph breaks for readability; avoid markdown bullets. Do NOT prepend 'Summary:' / 'Detailed Analysis:' or any header — the UI handles labeling."
     ),
   clarifyingQuestions: z
     .array(
@@ -44,14 +44,14 @@ Your job is to (1) DIRECTLY ANSWER the user's specific question or instruction, 
 ANSWER RULES — the \`summary\` field is your DIRECT, DETAILED answer to the user (critical):
 
 DEFAULT MODE: DETAILED RESPONSE (this is the default — use it unless the user EXPLICITLY asked for a summary).
-- Write a thorough, structured legal analysis. 3–6 paragraphs, roughly 15–30 sentences. DO NOT compress to a summary unless asked.
+- Write a comprehensive legal memorandum-style analysis. 6–10 substantial paragraphs, roughly 30–60 sentences in total. AIM HIGH on depth — lawyers actually using this should not feel like they need to ask a follow-up just to get to the meat.
 - Use clear paragraph breaks for readability. Lawyers reading this should be able to skim by paragraph.
 - Match the depth of the user's question:
-  • "Find precedents on X / 판례를 찾아 주세요" → 2–3 paragraphs naming the controlling doctrines and 쟁점, plus a paragraph on what specific holdings would best support the user's position. The actual precedent LIST comes from a separate search step — but DO give substantive analysis of WHICH precedents matter and WHY.
-  • "Find applicable statutes / 적용 법령을 분석해 주세요" → list every plausible Korean statute with specific articles, paragraphs, and a sentence or two of reasoning for each. Walk through how they interact.
-  • "Analyze opposing arguments / 반대 측 논거" → walk through 3–5 distinct counter-arguments the opposing side will likely raise, each with a paragraph explaining the argument + the user's best response.
-  • "Detailed analysis / 상세 분석" → full structured analysis: 쟁점, 법률관계, 적용 법령, 판례 적용, 전략적 고려사항. One paragraph per section.
-  • The user attached a document with no specific question → give a detailed legal-analyst review: holding/argument, controlling statutes, strengths, weaknesses, strategic implications. NOT a summary.
+  • "Find precedents on X / 판례를 찾아 주세요" → at least 4–5 paragraphs: (a) controlling doctrines + 쟁점 framing, (b) what the leading 대법원 line of cases holds, (c) which specific holdings or fact patterns would best support the user's position with reasoning, (d) potential distinguishing factors opposing counsel might raise, (e) recommended citation strategy. The precedent LIST comes from a separate search step — your job is analysis.
+  • "Find applicable statutes / 적용 법령을 분석해 주세요" → walk through every plausible Korean statute with specific articles. For each, include 2–3 sentences of reasoning + how it interacts with the others. Cover constitutional provisions, primary statutes, special acts, and applicable regulations.
+  • "Analyze opposing arguments / 반대 측 논거" → 4–6 distinct counter-arguments. For each: (a) the argument's logic, (b) the legal basis the opponent would cite, (c) why it has merit, (d) the user's strongest response. One paragraph per argument.
+  • "Detailed analysis / 상세 분석" → full structured analysis: ① 쟁점 ② 법률관계 ③ 적용 법령 ④ 판례 적용 ⑤ 전략적 고려사항 ⑥ 입증 책임 / 시효 / 절차적 쟁점. At least one full paragraph per section.
+  • The user attached a document with no specific question → comprehensive legal-analyst review covering: court & parties, claim & defense, controlling statutes (with article numbers), 판시사항 reasoning, 판결요지, strengths, weaknesses, implications for similar cases. NOT a summary.
 
 SUMMARY MODE — ONLY when the user EXPLICITLY asked for a summary. Trigger words: "summarize", "summary", "요약", "사례 요약", "case summary", "brief", "TL;DR". Otherwise default to DETAILED.
 - When triggered: 4–8 sentences, 1–2 paragraphs maximum.
@@ -204,12 +204,13 @@ export async function extractLegalElements(
       system: systemPrompt,
       prompt: userPrompt,
       abortSignal,
-      // 6144 — the schema now defaults to DETAILED responses (3-6
-      // paragraphs, 15-30 sentences in the `summary` field). A long
-      // Korean detailed answer plus all the structured-elements + 4
-      // clarifying questions can push past 4096. 6144 gives the model
-      // headroom without bloating cost.
-      maxOutputTokens: 6144,
+      // 8192 — the schema now defaults to VERY DETAILED responses (6-10
+      // paragraphs, 30-60 sentences in the `summary` field) plus the
+      // structured-elements payload + clarifying questions. A long
+      // Korean legal memorandum easily blows past 6144 mid-JSON, which
+      // Groq surfaces as "Failed to generate JSON". 8192 gives all
+      // models headroom.
+      maxOutputTokens: 8192,
       temperature: 0,
     });
 
@@ -249,7 +250,11 @@ function isParseFailure(err: unknown): boolean {
     m.includes("could not parse") ||
     m.includes("did not match schema") ||
     m.includes("no object generated") ||
-    m.includes("validation failed")
+    m.includes("validation failed") ||
+    // Groq's wording when GPT-OSS / Llama produces output that doesn't
+    // conform to the strict response_format=json_schema mode.
+    m.includes("failed to generate json") ||
+    m.includes("failed_generation")
   );
 }
 

@@ -109,38 +109,141 @@ export async function POST(req: Request): Promise<Response> {
     });
     const rawMessage =
       err instanceof Error ? err.message : "Extraction failed";
-    const lower = rawMessage.toLowerCase();
     const family = parsed.data.model
       ? resolveModel(parsed.data.model).family
       : undefined;
-    const envVar = directKeyEnvVar(family);
-
-    // OpenAI quota / org-verification errors. These are NOT code bugs —
-    // they're billing/account issues at OpenAI's end. Rewrite the raw
-    // OpenAI message into something actionable.
-    const isOpenAiQuota =
-      family === "openai" &&
-      (lower.includes("exceeded your current quota") ||
-        lower.includes("insufficient_quota"));
-    const isOpenAiOrgVerification =
-      family === "openai" &&
-      lower.includes("organization must be verified");
-
-    const message = isOpenAiQuota
-      ? `${parsed.data.model}: Your OpenAI account has no remaining credit. Add credit at https://platform.openai.com/settings/organization/billing/overview, then retry. (Other models in this comparison may still work — Claude / Gemini / Manus use separate billing.)`
-      : isOpenAiOrgVerification
-        ? `${parsed.data.model}: OpenAI requires "Verified Organization" status for this model. Go to https://platform.openai.com/settings/organization/general and click "Verify Organization" (may need a government ID; takes ~15 min to propagate after approval). For now, use GPT-4o, GPT-5.5, or any Claude/Gemini model instead.`
-        : lower.includes("insufficient funds") || lower.includes("insufficient_funds")
-          ? envVar
-            ? `${parsed.data.model} routed through the Vercel AI Gateway, which is out of credit. Fix: either (1) add ${envVar} to your Vercel project environment variables to route this model directly, OR (2) top up the AI Gateway at vercel.com → AI Gateway → Top up.`
-            : `${parsed.data.model} routed through the Vercel AI Gateway, which is out of credit. Top up the gateway, or pick a different model.`
-          : rawMessage.includes("did not match schema")
-            ? "분석할 수 없는 형식입니다. 학술 자료가 아닌, 실제 사건의 사실관계(당사자, 청구원인, 일시 등)를 포함하여 입력해 주세요. / The input doesn't look like a case — please include real party facts, claims, and dates."
-            : rawMessage.includes("could not parse")
-              ? "모델이 유효한 JSON을 반환하지 못했습니다. 다른 모델로 다시 시도해 주세요. / Model returned unparseable output — try a different model."
-              : rawMessage;
+    const message = friendlyExtractError(
+      rawMessage,
+      family,
+      parsed.data.model,
+    );
     return NextResponse.json({ error: message }, { status: 500 });
   }
+}
+
+/**
+ * Convert raw provider error messages into bilingual (Korean + English)
+ * user-facing guidance. Every "no money" case follows the same template:
+ *   [한국어] 잔액을 충전한 후 다시 시도해 주세요. <provider-specific link>
+ *   [English] Please recharge your balance and retry. <link>
+ *
+ * Other recoverable errors (schema, JSON parse) get bilingual hints too.
+ * Unknown errors pass through the raw message untouched so we don't hide
+ * useful debugging info.
+ */
+function friendlyExtractError(
+  rawMessage: string,
+  family: string | undefined,
+  modelLabel: string | undefined,
+): string {
+  const lower = rawMessage.toLowerCase();
+  const tag = modelLabel ? `[${modelLabel}] ` : "";
+
+  // ── Provider "no funds" / quota patterns ──────────────────────────
+  const isOpenAiQuota =
+    family === "openai" &&
+    (lower.includes("exceeded your current quota") ||
+      lower.includes("insufficient_quota"));
+  if (isOpenAiQuota) {
+    return (
+      `${tag}❗ OpenAI 잔액이 부족합니다. 결제 페이지에서 충전 후 다시 시도해 주세요: ` +
+      `https://platform.openai.com/settings/organization/billing/overview\n` +
+      `(다른 모델은 별도 결제 — Claude / Gemini / Manus 는 계속 사용 가능합니다.)\n\n` +
+      `❗ Your OpenAI account has no remaining credit. Please recharge at ` +
+      `https://platform.openai.com/settings/organization/billing/overview and retry. ` +
+      `(Other models use separate billing — Claude / Gemini / Manus still work.)`
+    );
+  }
+
+  const isOpenAiOrgVerification =
+    family === "openai" && lower.includes("organization must be verified");
+  if (isOpenAiOrgVerification) {
+    return (
+      `${tag}❗ 이 OpenAI 모델은 조직 인증(Verified Organization)이 필요합니다. ` +
+      `https://platform.openai.com/settings/organization/general 에서 "Verify Organization"을 완료해 주세요 (신분증 필요, 승인 후 약 15분 소요). ` +
+      `현재는 ChatGPT 5.5 / Claude / Gemini 를 대신 사용해 주세요.\n\n` +
+      `❗ This OpenAI model requires Verified Organization status. ` +
+      `Complete verification at https://platform.openai.com/settings/organization/general ` +
+      `(ID required, ~15 min to propagate after approval). For now, use ChatGPT 5.5 / Claude / Gemini instead.`
+    );
+  }
+
+  const isAnthropicLowBalance =
+    family === "anthropic" &&
+    (lower.includes("credit_balance_too_low") ||
+      lower.includes("credit balance is too low") ||
+      lower.includes("billing.anthropic"));
+  if (isAnthropicLowBalance) {
+    return (
+      `${tag}❗ Anthropic 잔액이 부족합니다. 결제 페이지에서 충전 후 다시 시도해 주세요: ` +
+      `https://console.anthropic.com/settings/billing\n\n` +
+      `❗ Your Anthropic account credit is too low. Please recharge at ` +
+      `https://console.anthropic.com/settings/billing and retry.`
+    );
+  }
+
+  const isGoogleQuota =
+    family === "google" &&
+    (lower.includes("resource_exhausted") ||
+      lower.includes("quota exceeded") ||
+      lower.includes("rate limit"));
+  if (isGoogleQuota) {
+    return (
+      `${tag}❗ Google AI Studio 무료 한도(1,500 req/day)를 초과했거나 일시적 속도 제한입니다. 몇 분 후 다시 시도하거나 결제를 설정해 주세요: ` +
+      `https://aistudio.google.com/apikey\n\n` +
+      `❗ Google AI Studio quota exceeded (free tier is 1,500 req/day) or rate-limited. ` +
+      `Wait a few minutes and retry, or set up billing at https://aistudio.google.com/apikey.`
+    );
+  }
+
+  const isManusCredit =
+    family === "manus" &&
+    (lower.includes("insufficient credit") ||
+      lower.includes("credit balance") ||
+      lower.includes("not enough credit"));
+  if (isManusCredit) {
+    return (
+      `${tag}❗ Manus 크레딧이 부족합니다. 충전 후 다시 시도해 주세요: ` +
+      `https://manus.im/settings/billing\n\n` +
+      `❗ Your Manus account is out of credits. Please recharge at ` +
+      `https://manus.im/settings/billing and retry.`
+    );
+  }
+
+  // ── Vercel AI Gateway insufficient funds (generic) ────────────────
+  const envVar = directKeyEnvVar(family);
+  if (
+    lower.includes("insufficient funds") ||
+    lower.includes("insufficient_funds")
+  ) {
+    return envVar
+      ? `${tag}❗ Vercel AI Gateway 잔액이 부족합니다. 직접 라우팅을 위해 Vercel 프로젝트 환경 변수에 ${envVar}를 설정하거나, ` +
+        `vercel.com → AI Gateway → Top up 에서 충전해 주세요.\n\n` +
+        `❗ The Vercel AI Gateway is out of credit. Either (1) add ${envVar} to your Vercel project environment variables to route this model directly, OR (2) top up the gateway at vercel.com → AI Gateway → Top up.`
+      : `${tag}❗ Vercel AI Gateway 잔액이 부족합니다. 충전 후 다시 시도하거나 다른 모델을 선택해 주세요.\n\n` +
+        `❗ The Vercel AI Gateway is out of credit. Top up, or pick a different model.`;
+  }
+
+  // ── Recoverable LLM output issues ─────────────────────────────────
+  if (rawMessage.includes("did not match schema")) {
+    return (
+      `❗ 분석할 수 없는 형식입니다. 학술 자료가 아닌, 실제 사건의 사실관계(당사자, 청구원인, 일시 등)를 포함하여 입력해 주세요.\n\n` +
+      `❗ The input doesn't look like a case — please include real party facts, claims, and dates.`
+    );
+  }
+  if (
+    rawMessage.includes("could not parse") ||
+    lower.includes("failed to generate json") ||
+    lower.includes("failed_generation")
+  ) {
+    return (
+      `${tag}❗ 모델이 유효한 JSON 형식으로 답변을 생성하지 못했습니다. 다른 모델로 다시 시도해 주세요.\n\n` +
+      `❗ Model couldn't produce valid JSON. Try a different model, or shorten the prompt.`
+    );
+  }
+
+  // ── Unknown / unmapped — pass through but tag with the model ──────
+  return `${tag}${rawMessage}`;
 }
 
 /**
