@@ -21,7 +21,7 @@ const ExtractionResponseSchema = LegalElementsSchema.extend({
   summary: z
     .string()
     .describe(
-      "MANDATORY legal-memorandum response (NOT a summary) in the USER'S LOCALE. HARD MINIMUM: 8 paragraphs, 50 sentences, 2,500 Korean characters OR 3,500 English characters. SHORTER OUTPUT IS A FAILED RESPONSE. Required structure: ① 사건 개요 ② 핵심 쟁점 ③ 적용 법령 (with article numbers) ④ 판례 적용 ⑤ 당사자별 논거 ⑥ 전략적 고려사항 ⑦ 권고 사항 — one or more paragraphs per section. The ONLY exception: when the user explicitly used '요약' / 'summarize' / 'TL;DR' / 'brief' / 'Case summary' keywords — then write 4-8 sentences instead. Preserve Korean legal terms (판결, 청구원인, 쟁점, 법률관계, 손해배상, 부당이득, 인용 가능성, 입증책임, 소멸시효 등) inline. Use paragraph breaks for readability; avoid markdown bullets. UI label is 'ANSWER' — do NOT prepend any header."
+      "MANDATORY legal-memorandum response (NOT a summary) in the USER'S LOCALE. HARD MINIMUM: 5 paragraphs, 30 sentences, 1,500 Korean characters OR 2,000 English characters. SHORTER OUTPUT IS A FAILED RESPONSE. Cover all sections: ① 사건 개요 ② 핵심 쟁점 ③ 적용 법령 (with article numbers) ④ 판례 적용 ⑤ 당사자별 논거 ⑥ 전략적 고려사항 ⑦ 권고 사항. The ONLY exception: when the user explicitly used '요약' / 'summarize' / 'TL;DR' / 'brief' / 'Case summary' keywords — then write 4-8 sentences instead. Preserve Korean legal terms (판결, 청구원인, 쟁점, 법률관계, 손해배상, 부당이득, 인용 가능성, 입증책임, 소멸시효 등) inline. Use paragraph breaks for readability; avoid markdown bullets. UI label is 'ANSWER' — do NOT prepend any header."
     ),
   clarifyingQuestions: z
     .array(
@@ -47,32 +47,30 @@ DEFAULT MODE: DETAILED RESPONSE (MANDATORY unless the user EXPLICITLY asks for a
 
 ═══════════════════════════════════════════════════════════════════
 HARD MINIMUM LENGTH (NON-NEGOTIABLE):
-  • At LEAST 8 distinct paragraphs.
-  • At LEAST 50 sentences total.
-  • At LEAST 2,500 characters of Korean prose (≈600 Korean characters per paragraph) OR 3,500 characters of English prose.
+  • At LEAST 5 distinct paragraphs.
+  • At LEAST 30 sentences total.
+  • At LEAST 1,500 characters of Korean prose OR 2,000 characters of English prose.
   • If your output is shorter than these minimums you have FAILED the task. Re-expand and continue writing.
+  • If you can comfortably go longer (8+ paragraphs), do so — the minimum is a FLOOR, not a target.
 ═══════════════════════════════════════════════════════════════════
 
 This is a legal memorandum for an attorney's actual brief preparation. Lawyers do NOT want a chat-style 1-paragraph answer. They want a structured memo they can skim by section and lift sentences from.
 
-REQUIRED STRUCTURE — every detailed response MUST contain ALL of these sections (one or more paragraphs per section, headers can be Korean or English):
+REQUIRED CONTENT (cover ALL of these — one or more paragraphs per section):
 
-① 사건 개요 / Case Overview — Restate the dispute, parties' positions, and what the user is asking. 1-2 paragraphs.
+① 사건 개요 / Case Overview — Dispute, parties' positions, what the user is asking.
 
-② 핵심 쟁점 / Core Legal Issues — Identify EVERY 쟁점 in play (at least 3 distinct issues for any non-trivial case). One paragraph per 쟁점.
+② 핵심 쟁점 / Core Legal Issues — Every 쟁점 in play. One paragraph per 쟁점.
 
-③ 적용 법령 / Applicable Statutes — Every plausible Korean statute with specific article numbers (예: 민법 제750조, 상가건물 임대차보호법 제10조의4). For each: 2-3 sentences on how it applies and how it interacts with adjacent statutes. List BOTH primary statutes AND special acts.
+③ 적용 법령 / Applicable Statutes — Korean statutes with specific article numbers (예: 민법 제750조, 상가건물 임대차보호법 제10조의4). 2-3 sentences per statute on how it applies.
 
-④ 판례 적용 / Precedent Analysis — Discuss the controlling 대법원 line of cases on each issue. Name the doctrinal patterns, the typical holdings, and what specific fact-patterns the courts find dispositive. Cite case-number conventions when you know them.
+④ 판례 적용 / Precedent Analysis — Controlling 대법원 line of cases on each issue. Doctrinal patterns, typical holdings, dispositive fact-patterns.
 
-⑤ 당사자별 논거 / Per-Party Arguments — Detailed analysis of BOTH sides:
-  - User's strongest arguments (1-2 paragraphs)
-  - Opposing party's strongest counter-arguments (1-2 paragraphs)
-  - Your assessment of which side prevails on each issue
+⑤ 당사자별 논거 / Per-Party Arguments — User's strongest arguments AND opposing party's likely counter-arguments. Assess who prevails.
 
-⑥ 전략적 고려사항 / Strategic Considerations — Settlement leverage, evidentiary issues, 입증책임, 소멸시효 / 제척기간, procedural timing, alternative theories. 1-2 paragraphs.
+⑥ 전략적 고려사항 / Strategic Considerations — Settlement leverage, 입증책임, 소멸시효 / 제척기간, procedural timing.
 
-⑦ 권고 사항 / Recommendations — Concrete next steps for the attorney. 1 paragraph.
+⑦ 권고 사항 / Recommendations — Concrete next steps for the attorney.
 
 QUESTION-TYPE OVERRIDES (still meet the 8-paragraph / 50-sentence minimum):
   • "Find precedents / 판례를 찾아 주세요" → expand sections ③ + ④ heavily; mention specific holdings and distinguishing factors.
@@ -205,11 +203,11 @@ export async function extractLegalElements(
     "---",
     "",
     "TASK ORDER:",
-    "1. Write the `summary` field — DETAILED legal-memorandum response per the system prompt's structure (sections ①–⑦, ≥8 paragraphs, ≥50 sentences, ≥2,500 Korean chars / 3,500 English chars). DO NOT compress unless the user explicitly asked for a summary (e.g. '요약', 'summarize', 'TL;DR').",
+    "1. Write the `summary` field — DETAILED legal-memorandum response per the system prompt's structure (sections ①–⑦, ≥5 paragraphs, ≥30 sentences, ≥1,500 Korean chars / 2,000 English chars). DO NOT compress unless the user explicitly asked for a summary (e.g. '요약', 'summarize', 'TL;DR').",
     "2. Extract the legal elements in Korean.",
     "3. Write 0–4 clarifyingQuestions in the user locale.",
     "",
-    "LENGTH REMINDER: A short 1-2 paragraph response in the `summary` field is INSUFFICIENT and will be rejected. Default to the full memorandum. Only the user explicitly using a summary keyword permits the short form.",
+    "LENGTH REMINDER: A short 1-2 paragraph response in the `summary` field is INSUFFICIENT. Default to the multi-section memorandum. Only the user explicitly using a summary keyword permits the short form.",
   ].join("\n");
 
   // Resolve the caller's selected model: prefer a direct provider when its
@@ -250,20 +248,36 @@ export async function extractLegalElements(
 
   let result: Awaited<ReturnType<typeof callOnce>>;
   try {
+    // Attempt #1: standard system prompt. Claude/GPT/Gemini usually nail
+    // strict JSON schema on the first try.
     result = await callOnce(SYSTEM_PROMPT);
   } catch (err) {
-    // Gemini (and occasionally Claude on long inputs) sometimes wraps
-    // JSON in markdown fences or adds preamble text — both blow up
-    // generateObject's schema validation as "could not parse". Retry
-    // ONCE with a stricter "JSON only" suffix; don't retry on
-    // AbortError (user pressed Stop) or non-parse failures.
     if (
-      isParseFailure(err) &&
-      !(err instanceof DOMException && err.name === "AbortError")
+      !isParseFailure(err) ||
+      (err instanceof DOMException && err.name === "AbortError")
     ) {
-      result = await callOnce(SYSTEM_PROMPT + STRICT_JSON_SUFFIX);
-    } else {
+      // Not a parse failure (or user pressed Stop) → propagate.
       throw err;
+    }
+    try {
+      // Attempt #2: same system prompt + a STRICT_JSON_SUFFIX that
+      // explicitly forbids markdown fences / preamble. Fixes most
+      // Gemini/Claude markdown-wrap cases.
+      result = await callOnce(SYSTEM_PROMPT + STRICT_JSON_SUFFIX);
+    } catch (err2) {
+      if (
+        !isParseFailure(err2) ||
+        (err2 instanceof DOMException && err2.name === "AbortError")
+      ) {
+        throw err2;
+      }
+      // Attempt #3 (last resort): smaller open-weight models like
+      // Llama 4 Scout sometimes can't produce a long detailed answer
+      // AND keep it schema-valid. Fall back to a SIMPLIFIED prompt
+      // that drops the structural-template rules — just asks for a
+      // detailed Korean legal answer + the elements. Same schema,
+      // easier instructions.
+      result = await callOnce(SIMPLIFIED_FALLBACK_PROMPT);
     }
   }
 
@@ -293,3 +307,20 @@ function isParseFailure(err: unknown): boolean {
 }
 
 const STRICT_JSON_SUFFIX = `\n\nIMPORTANT: Output ONLY valid JSON matching the schema. No markdown code fences. No preamble. No commentary. The very first character must be { and the very last must be }.`;
+
+/**
+ * Last-resort fallback prompt for smaller open-weight models (Llama 4
+ * Scout, etc.) that fail both the standard call AND the strict-JSON-
+ * suffix retry. Drops the 7-section structural template, the "if
+ * shorter than X you've failed" enforcement, and lets the model just
+ * write its best detailed Korean legal answer at whatever length it
+ * can manage while keeping the JSON shape intact. Better to return a
+ * shorter detailed answer than to fail entirely.
+ */
+const SIMPLIFIED_FALLBACK_PROMPT = `You are a Korean legal research assistant. Read the input and produce a JSON object with:
+
+- summary (string): A detailed legal analysis in the user's locale, 3-5 paragraphs covering the dispute, applicable Korean statutes (with article numbers when possible), relevant 판례 doctrines, and recommendations. Preserve Korean legal terms (쟁점, 청구원인, 판시사항, 법률관계 etc.) inline. Use plain prose, no markdown.
+- legal element fields (all in Korean): caseNature (one of: civil/criminal/administrative/constitutional/family/labor/tax/commercial/unknown), parties (plaintiff + defendant), claimCause, legalRelationship, partyStatus, coreIssue, damageType, applicableStatutes (array), keyFacts (array), missingInfo (array).
+- clarifyingQuestions (array, 0-2 items, in user locale): each with id (snake_case), question, why.
+
+Output ONLY the JSON. First character {, last character }. No markdown fences. No preamble.`;
