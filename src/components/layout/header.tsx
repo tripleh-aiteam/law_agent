@@ -2,10 +2,14 @@
 
 import * as React from "react";
 import { useLocale, useTranslations } from "next-intl";
-import { Globe, Settings2 } from "lucide-react";
+import { Building2, Globe, Settings2, ShieldOff } from "lucide-react";
 
 import { useCases } from "@/components/cases/cases-context";
 import { ModelSelector } from "@/components/layout/model-selector";
+import {
+  ToolsPanel,
+  type ToolsPanelTool,
+} from "@/components/tools/tools-panel";
 import { usePathname, useRouter } from "@/i18n/navigation";
 
 export function Header() {
@@ -18,6 +22,7 @@ export function Header() {
   const { currentCase, renameCase } = useCases();
   const [editing, setEditing] = React.useState(false);
   const [draft, setDraft] = React.useState("");
+  const [activeTool, setActiveTool] = React.useState<ToolsPanelTool>(null);
 
   const currentCaseLabel = currentCase
     ? currentCase.nameKey
@@ -76,6 +81,28 @@ export function Header() {
         )}
       </div>
       <div className="flex items-center gap-1.5">
+        {/* Tool quick-actions — not tied to the conversation, no LLM cost
+            for the regex-only redact mode + free NTS API for biz lookup. */}
+        <button
+          type="button"
+          onClick={() => setActiveTool("redact")}
+          className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-100"
+          title="🔒 PII 자동 제거 / Auto-redact personal info"
+          aria-label="PII redact"
+        >
+          <ShieldOff className="h-3.5 w-3.5 text-slate-500" aria-hidden />
+          PII
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTool("business-lookup")}
+          className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-100"
+          title="🏢 사업자등록번호 조회 / Verify business registration"
+          aria-label="Business lookup"
+        >
+          <Building2 className="h-3.5 w-3.5 text-slate-500" aria-hidden />
+          사업자
+        </button>
         <ModelSelector />
         <button
           type="button"
@@ -95,6 +122,7 @@ export function Header() {
           <Settings2 className="h-3.5 w-3.5" aria-hidden />
         </button>
       </div>
+      <ToolsPanel tool={activeTool} onClose={() => setActiveTool(null)} />
     </header>
   );
 }
