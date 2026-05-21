@@ -282,19 +282,39 @@ function directKeyEnvVar(family: string | undefined): string | undefined {
  */
 function buildManusPrompt(narrative: string, locale: "ko" | "en"): string {
   const isKo = locale === "ko";
-  // Same default-detailed rule as the other LLMs (extractor.ts SYSTEM_PROMPT).
-  // Manus's lite profile follows natural-language instructions, so a short
-  // hint up front sets the response depth.
+  // Same hard-minimum detailed rule as the other LLMs.
   const hint = isKo
-    ? `한국 법률 자문 맥락에서의 질문입니다. 답변 규칙:
-- 기본: 변호사가 사용할 수 있는 상세하고 구조화된 법률 분석을 작성합니다 (3–6 단락, 15–30 문장). 짧은 요약으로 줄이지 마세요.
-- 예외: 사용자가 명시적으로 "요약" / "summarize" / "TL;DR" 등을 요청한 경우에만 4–8 문장의 짧은 요약으로 답합니다.
-- 한국 법률 용어(쟁점, 청구원인, 판시사항, 법률관계, 인용 가능성 등)는 영어 답변에서도 그대로 유지합니다.
-- 가독성을 위해 단락 구분을 사용하되, markdown bullet 목록은 피하고 산문 형식으로 작성합니다.`
-    : `This is a Korean legal advice context. Response rules:
-- DEFAULT: write a detailed, structured legal analysis a lawyer can actually use (3–6 paragraphs, 15–30 sentences). Do NOT compress to a summary unless asked.
-- EXCEPTION: only when the user explicitly asks for a summary ('summarize', '요약', 'TL;DR'), give a 4–8 sentence short summary instead.
-- Preserve Korean legal terms (쟁점, 청구원인, 판시사항, 법률관계, 인용 가능성 etc.) inline even in English.
-- Use clear paragraph breaks; avoid markdown bullets — write in prose form.`;
+    ? `한국 법률 자문 맥락에서의 질문입니다. 답변 규칙(엄격):
+
+[필수 최소 길이]
+- 최소 8단락, 50문장, 한국어 2,500자 이상. 짧으면 실패한 답변입니다.
+
+[필수 구조 — 모든 섹션을 빠짐없이 포함]
+① 사건 개요  ② 핵심 쟁점  ③ 적용 법령(조문 번호 포함)
+④ 판례 적용  ⑤ 당사자별 논거(원·피고 양측)
+⑥ 전략적 고려사항(입증책임/시효 포함)  ⑦ 권고 사항
+
+[예외 — 짧은 요약은 사용자가 명시적으로 "요약", "summarize", "TL;DR", "사례 요약", "case summary" 키워드를 쓴 경우에만]
+- 그때만 4–8문장으로 답합니다.
+
+[기타]
+- 한국 법률 용어(쟁점, 청구원인, 판시사항, 법률관계, 인용 가능성, 입증책임, 소멸시효 등)는 영어 답변에서도 그대로 유지.
+- 단락 구분 사용, markdown bullet 목록 피하고 산문 형식.`
+    : `Korean legal advice context. Response rules (strict):
+
+[MANDATORY MINIMUM LENGTH]
+- At least 8 paragraphs, 50 sentences, 3,500 English characters. Shorter = failed response.
+
+[REQUIRED STRUCTURE — include ALL sections]
+① Case Overview  ② Core Issues  ③ Applicable Statutes (with article numbers)
+④ Precedent Analysis  ⑤ Per-party Arguments (both sides)
+⑥ Strategic Considerations (incl. burden of proof / statute of limitations)  ⑦ Recommendations
+
+[EXCEPTION — short summary ONLY when the user explicitly used a summary keyword ('summarize', '요약', 'TL;DR', 'brief', 'case summary')]
+- Then 4–8 sentences only.
+
+[Other]
+- Preserve Korean legal terms (쟁점, 청구원인, 판시사항, 법률관계, 인용 가능성, 입증책임, 소멸시효 등) inline even in English.
+- Use paragraph breaks; avoid markdown bullets — write in prose.`;
   return `${hint}\n\n---\n\n${narrative.trim()}`;
 }
