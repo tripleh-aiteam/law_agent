@@ -23,20 +23,24 @@ const MANUS_BASE_URL = "https://api.manus.ai";
 const CREATE_TASK_PATH = "/v1/tasks";
 const GET_TASK_PATH = (id: string) => `/v1/tasks/${encodeURIComponent(id)}`;
 
-/** How often we poll while the task is running (ms). Lite tasks finish in
- *  ~15–60s so a 2s interval gives snappy UX without hammering the API. */
+/** How often we poll while the task is running (ms). */
 const POLL_INTERVAL_MS = 2_000;
-/** Hard ceiling on polling. Lite tasks rarely exceed 90s. */
-const POLL_MAX_MS = 90_000;
 /**
- * If Manus has produced assistant text but the task is STILL running after
- * this many ms, we treat whatever it said as the answer and stop polling.
- * Manus tasks can stall in an "awaiting user input" state (e.g. when the
- * prompt is ambiguous — it asks a clarifying question and waits for a
- * reply that will never come). Without this early-extract, those tasks
- * would burn the full POLL_MAX_MS even though we already have output.
+ * Hard ceiling on polling. 3 min covers real Manus research tasks
+ * (which can take 60-150s for substantial legal queries). Previously
+ * 90s was too tight and was bailing on tasks that were genuinely
+ * still producing the final answer.
  */
-const EARLY_EXTRACT_AFTER_MS = 45_000;
+const POLL_MAX_MS = 180_000;
+/**
+ * If Manus is stuck in an "awaiting user input" state we want to bail
+ * early — but ONLY when the assistant's last message clearly looks
+ * like a clarification request (not just an intermediate "I'll get
+ * back to you" placeholder). Old logic triggered on any assistant
+ * text after 45s, which prematurely returned "잠시만 기다려 주십시오"
+ * as if it were the final answer.
+ */
+const EARLY_EXTRACT_AFTER_MS = 90_000;
 
 export type ManusTaskStatus =
   | "pending"
@@ -239,15 +243,17 @@ export async function waitForCompletion(
       return task!;
     }
 
-    // Early-extract: if Manus has produced assistant text but the task is
-    // still running after EARLY_EXTRACT_AFTER_MS, the task is most likely
-    // stalled in an "awaiting user input" state (Manus asked a clarifying
-    // question and is waiting for a reply that will never come). Take
-    // whatever it said as the answer rather than polling for 5+ minutes.
+    // Early-extract: if Manus is stuck waiting for the user to reply to
+    // a clarification question (an "awaiting input" state that never
+    // reaches `completed` from the API's perspective), bail with what
+    // we have. CRITICAL: only triggers when the LAST assistant message
+    // actually looks like a clarification request — NOT for intermediate
+    // "I'll get back to you" or "please wait" placeholders.
     const elapsed = Date.now() - startedAt;
-    if (elapsed > EARLY_EXTRACT_AFTER_MS && hasAssistantText(task!)) {
-      // Pretend it's completed — return as-is, with the assistant text
-      // we already have being extracted by extractFinalText downstream.
+    if (
+      elapsed > EARLY_EXTRACT_AFTER_MS &&
+      looksLikeStuckAwaitingInput(task!)
+    ) {
       return { ...task!, status: "completed" };
     }
 
@@ -262,17 +268,79 @@ export async function waitForCompletion(
   }
 }
 
-/** True iff the task has any non-empty assistant text in its output. */
-function hasAssistantText(task: ManusGetResponse): boolean {
-  for (const item of task.output ?? []) {
+/**
+ * Heuristic: does this task's most recent assistant message look like
+ * Manus is stuck asking the user for more information?
+ *
+ * Examples that SHOULD trigger:
+ *   • "사건의 내용을 알려주십시오"
+ *   • "구체적인 사실관계가 필요합니다. 첨부해 주시기 바랍니다."
+ *   • "Could you provide the case details?"
+ *
+ * Examples that SHOULD NOT trigger (intermediate progress, not stuck):
+ *   • "알겠습니다. ... 잠시만 기다려 주십시오." (working on it, please wait)
+ *   • "I'll start researching now"
+ *   • "Analyzing the case..."
+ */
+function looksLikeStuckAwaitingInput(task: ManusGetResponse): boolean {
+  // Find the most recent assistant message.
+  const items = task.output ?? [];
+  let lastAssistantText = "";
+  for (const item of items) {
     if (item.role !== "assistant") continue;
     for (const c of item.content ?? []) {
-      if (typeof c.text === "string" && c.text.trim().length > 20) {
-        return true;
+      if (typeof c.text === "string" && c.text.trim()) {
+        lastAssistantText = c.text;
       }
     }
   }
-  return false;
+  const text = lastAssistantText.trim();
+  if (text.length < 30) return false;
+
+  // "Working on it / please wait" patterns — do NOT bail.
+  const intermediatePatterns = [
+    "잠시만 기다",
+    "잠시만요",
+    "조사하여 정리",
+    "분석 중",
+    "검색 중",
+    "확인 중",
+    "i'll start",
+    "i will research",
+    "analyzing",
+    "let me",
+    "please wait",
+  ];
+  const lower = text.toLowerCase();
+  if (intermediatePatterns.some((p) => lower.includes(p.toLowerCase()))) {
+    return false;
+  }
+
+  // "Asking for case info" patterns — DO bail.
+  const clarificationPatterns = [
+    "사건의 내용",
+    "사실관계를 알려",
+    "사실관계가 필요",
+    "사건 번호를 알려",
+    "구체적인 사건",
+    "내용이 포함되어 있지 않",
+    "정보가 필요합니다",
+    "정보를 제공",
+    "붙여넣어 주",
+    "기재해 주",
+    "could you provide",
+    "please clarify",
+    "what case",
+    "more information",
+    "additional context",
+  ];
+  if (clarificationPatterns.some((p) => lower.includes(p.toLowerCase()))) {
+    return true;
+  }
+
+  // Fallback: if the message ends with "?" or contains both "?" and a
+  // request word like "주십시오 / please", it's probably asking.
+  return /[?？]\s*$/.test(text) && /주십시오|주세요|please|provide/i.test(text);
 }
 
 function isManusNotFoundError(err: unknown): boolean {
