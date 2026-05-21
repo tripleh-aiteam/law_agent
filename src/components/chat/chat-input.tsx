@@ -336,25 +336,37 @@ export function ChatInput() {
             summary: lastCompleted.summary,
           } as Partial<TurnBranch>);
 
-        const contextBlock: string[] = [
-          "[이전 대화 / Prior conversation]",
-        ];
-        if (lastCompleted.narrative) {
-          contextBlock.push(
-            `이전 사건 사실관계 / Previous case context:\n${lastCompleted.narrative}`,
-          );
+        // Only include the prior-conversation block when the prior turn
+        // has SUBSTANTIVE content (real case narrative). Otherwise we'd
+        // be sending the LLM a wall of empty headers with no actual
+        // case material — which makes models like Manus correctly
+        // reply "you didn't include the case content".
+        const priorNarrative = lastCompleted.narrative?.trim() ?? "";
+        const priorSummary = priorBranch?.summary?.trim() ?? "";
+        const priorIsSubstantive =
+          priorNarrative.length > 200 || priorSummary.length > 100;
+
+        if (priorIsSubstantive) {
+          const contextBlock: string[] = [
+            "[이전 대화 / Prior conversation]",
+          ];
+          if (priorNarrative.length > 0) {
+            contextBlock.push(
+              `이전 사건 사실관계 / Previous case context:\n${priorNarrative}`,
+            );
+          }
+          if (lastCompleted.question?.trim()) {
+            contextBlock.push(
+              `이전 질문 / Previous question: ${lastCompleted.question.trim()}`,
+            );
+          }
+          if (priorSummary.length > 0) {
+            contextBlock.push(
+              `이전 분석 요약 / Previous analysis summary:\n${priorSummary}`,
+            );
+          }
+          sections.push(contextBlock.join("\n\n"));
         }
-        if (lastCompleted.question) {
-          contextBlock.push(
-            `이전 질문 / Previous question: ${lastCompleted.question}`,
-          );
-        }
-        if (priorBranch?.summary) {
-          contextBlock.push(
-            `이전 분석 요약 / Previous analysis summary:\n${priorBranch.summary}`,
-          );
-        }
-        sections.push(contextBlock.join("\n\n"));
       }
 
       if (q) {
@@ -602,25 +614,44 @@ export function ChatInput() {
    */
   const handleChipAction = React.useCallback(
     (prompt: string) => {
-      const hasContext =
-        hasReadyAttachments || hasPriorTurns || value.trim().length > 0;
-      if (hasContext && !isSending && selectedModelIds.length > 0) {
+      // CONTEXT GATE — only fire to the LLMs when we actually have case
+      // material to reason over. Just having "any prior turn" is too
+      // permissive: empty chip-fired turns count as prior turns but their
+      // narratives are also empty, producing a recursive emptiness where
+      // every Manus call returns "you didn't include the case content".
+      //
+      // "Real" context means ONE of:
+      //   • A ready attachment (PDF/DOCX/etc with text extracted), OR
+      //   • The user typed substantive text (>50 chars), OR
+      //   • A prior turn exists whose narrative has substantive content
+      //     (>200 chars — enough to recognize a real case description)
+      const lastCompleted = (currentCase?.turns ?? [])
+        .slice()
+        .reverse()
+        .find((t) => t.status === "complete");
+      const priorNarrativeLength = lastCompleted?.narrative?.length ?? 0;
+      const hasRealContext =
+        hasReadyAttachments ||
+        value.trim().length > 50 ||
+        priorNarrativeLength > 200;
+
+      if (hasRealContext && !isSending && selectedModelIds.length > 0) {
         // Clear the textarea so the user sees the chip's prompt take
         // over (it'll show in the Q bubble of the new turn).
         setValue("");
         void onSend(prompt);
       } else {
-        // No context — fall back to prefix-into-textarea so the user can
-        // type their case facts before sending.
+        // Not enough context — fall back to prefix-into-textarea so the
+        // user can type their case facts or attach a file before sending.
         replaceWithPrefix(prompt);
       }
     },
     [
       hasReadyAttachments,
-      hasPriorTurns,
       value,
       isSending,
       selectedModelIds,
+      currentCase,
       onSend,
       replaceWithPrefix,
     ],

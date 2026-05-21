@@ -26,9 +26,17 @@ const GET_TASK_PATH = (id: string) => `/v1/tasks/${encodeURIComponent(id)}`;
 /** How often we poll while the task is running (ms). Lite tasks finish in
  *  ~15–60s so a 2s interval gives snappy UX without hammering the API. */
 const POLL_INTERVAL_MS = 2_000;
-/** Hard ceiling on polling. Lite tasks rarely exceed 90s but we leave 5
- *  min of headroom for edge cases (large prompts, retries, etc.). */
-const POLL_MAX_MS = 5 * 60 * 1000;
+/** Hard ceiling on polling. Lite tasks rarely exceed 90s. */
+const POLL_MAX_MS = 90_000;
+/**
+ * If Manus has produced assistant text but the task is STILL running after
+ * this many ms, we treat whatever it said as the answer and stop polling.
+ * Manus tasks can stall in an "awaiting user input" state (e.g. when the
+ * prompt is ambiguous — it asks a clarifying question and waits for a
+ * reply that will never come). Without this early-extract, those tasks
+ * would burn the full POLL_MAX_MS even though we already have output.
+ */
+const EARLY_EXTRACT_AFTER_MS = 45_000;
 
 export type ManusTaskStatus =
   | "pending"
@@ -192,7 +200,8 @@ export async function waitForCompletion(
   taskId: string,
   signal?: AbortSignal,
 ): Promise<ManusGetResponse> {
-  const deadline = Date.now() + POLL_MAX_MS;
+  const startedAt = Date.now();
+  const deadline = startedAt + POLL_MAX_MS;
   let firstPoll = true;
   while (true) {
     let task: ManusGetResponse;
@@ -220,6 +229,8 @@ export async function waitForCompletion(
       }
     }
     firstPoll = false;
+
+    // Terminal state — return immediately.
     if (
       task!.status === "completed" ||
       task!.status === "failed" ||
@@ -227,13 +238,41 @@ export async function waitForCompletion(
     ) {
       return task!;
     }
+
+    // Early-extract: if Manus has produced assistant text but the task is
+    // still running after EARLY_EXTRACT_AFTER_MS, the task is most likely
+    // stalled in an "awaiting user input" state (Manus asked a clarifying
+    // question and is waiting for a reply that will never come). Take
+    // whatever it said as the answer rather than polling for 5+ minutes.
+    const elapsed = Date.now() - startedAt;
+    if (elapsed > EARLY_EXTRACT_AFTER_MS && hasAssistantText(task!)) {
+      // Pretend it's completed — return as-is, with the assistant text
+      // we already have being extracted by extractFinalText downstream.
+      return { ...task!, status: "completed" };
+    }
+
     if (Date.now() > deadline) {
       throw new Error(
-        `Manus task timed out after ${POLL_MAX_MS / 60_000} minutes. Task: ${task!.metadata?.task_url ?? taskId}`,
+        `Manus task timed out after ${Math.round(POLL_MAX_MS / 1000)}s. ` +
+          `The prompt may have been ambiguous — Manus is likely waiting ` +
+          `for clarification. Inspect the task: ${task!.metadata?.task_url ?? taskId}`,
       );
     }
     await sleep(POLL_INTERVAL_MS, signal);
   }
+}
+
+/** True iff the task has any non-empty assistant text in its output. */
+function hasAssistantText(task: ManusGetResponse): boolean {
+  for (const item of task.output ?? []) {
+    if (item.role !== "assistant") continue;
+    for (const c of item.content ?? []) {
+      if (typeof c.text === "string" && c.text.trim().length > 20) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 function isManusNotFoundError(err: unknown): boolean {
