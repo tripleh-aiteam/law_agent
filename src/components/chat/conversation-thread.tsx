@@ -597,14 +597,6 @@ function downloadBranchAnswer(turn: CaseTurn, branch: TurnBranch): void {
     })
     .join("");
 
-  const elementsBlock =
-    branch.elements && branch.elements.coreIssue
-      ? `
-        <h2>Extracted Legal Elements</h2>
-        <pre>${esc(JSON.stringify(branch.elements, null, 2))}</pre>
-      `
-      : "";
-
   // MSO namespace declarations + a small set of styles that Word
   // (and 한컴) renders cleanly. Korean font fallback is included so
   // CJK characters render correctly in Word on Windows / Mac.
@@ -654,8 +646,6 @@ function downloadBranchAnswer(turn: CaseTurn, branch: TurnBranch): void {
       ? `<h2>Similar Precedents (${matches.length})</h2>${matchBlocks}`
       : ""
   }
-
-  ${elementsBlock}
 </body>
 </html>`;
 
