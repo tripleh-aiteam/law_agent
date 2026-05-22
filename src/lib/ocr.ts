@@ -5,25 +5,29 @@
  * paid keys or only the free ones. On any provider failure (auth, rate
  * limit, model rejection, timeout), we move to the next.
  *
+ * We call each provider's SDK DIRECTLY (not through the AI Gateway)
+ * because direct provider keys are more commonly configured in Vercel
+ * than the gateway key, and they bypass any gateway billing/balance
+ * issues.
+ *
  * Provider order is FREE-FIRST so OCR works on the free tier and only
  * burns paid credits when the free quota is exhausted:
  *
  *   1. Google Gemini Flash 2.5      — free 1,500 req/day, native PDF + image
  *   2. Groq Llama 4 Scout           — free 14,400 req/day, image-only
  *   3. Anthropic Claude Sonnet 4.6  — paid, native PDF + image
- *   4. OpenAI GPT-5.5 / GPT-4o      — paid, image (PDF support partial)
- *
- * All routing is via the AI Gateway (plain "provider/model" strings) so
- * users don't need direct provider keys — one AI_GATEWAY_API_KEY covers
- * the whole cascade.
+ *   4. OpenAI GPT-4o-mini           — paid, image (PDF support partial)
  *
  * Limits enforced before any provider call:
  *   - PDF: ≤ 32 MB / 100 pages (Claude's documented ceiling)
  *   - Image: ≤ 5 MB (Claude's documented ceiling)
  *   - 90-second hard timeout per provider attempt
  */
-import { generateText } from "ai";
-import { resolveModelForUse } from "./resolve-model";
+import { generateText, type LanguageModel } from "ai";
+import { anthropic } from "@ai-sdk/anthropic";
+import { google } from "@ai-sdk/google";
+import { openai } from "@ai-sdk/openai";
+import { groq } from "@ai-sdk/groq";
 
 const OCR_TIMEOUT_MS = 90_000;
 const MAX_OCR_BYTES = 32 * 1024 * 1024; // 32 MB (PDF)
@@ -35,42 +39,77 @@ const OCR_PROMPT = `You are an OCR engine. Extract ALL textual content from the 
 export type OcrResult = {
   text: string;
   warnings: string[];
-  /** Which provider actually produced the result (for debugging / observability). */
+  /** Which provider actually produced the result (for debugging). */
   provider?: string;
 };
 
-/**
- * Provider cascades. Each entry is a Vercel AI Gateway model id. Free
- * providers come first; paid providers are tried only if the free ones
- * are unavailable.
- */
-const PDF_PROVIDER_CASCADE: string[] = [
-  "google/gemini-2.5-flash",
-  "anthropic/claude-sonnet-4-6",
-  "openai/gpt-4o-mini",
+type ProviderEntry = {
+  label: string;
+  /** Returns the model instance, or undefined if the required key isn't set. */
+  resolve: () => LanguageModel | undefined;
+};
+
+function ifEnv<T>(name: string, get: () => T): T | undefined {
+  const v = process.env[name];
+  return v && v.trim() ? get() : undefined;
+}
+
+const PDF_CASCADE: ProviderEntry[] = [
+  {
+    label: "google/gemini-2.5-flash",
+    resolve: () =>
+      ifEnv("GOOGLE_GENERATIVE_AI_API_KEY", () => google("gemini-2.5-flash")),
+  },
+  {
+    label: "anthropic/claude-sonnet-4-6",
+    resolve: () =>
+      ifEnv("ANTHROPIC_API_KEY", () => anthropic("claude-sonnet-4-6")),
+  },
+  {
+    label: "openai/gpt-4o-mini",
+    resolve: () => ifEnv("OPENAI_API_KEY", () => openai("gpt-4o-mini")),
+  },
 ];
 
-const IMAGE_PROVIDER_CASCADE: string[] = [
-  "google/gemini-2.5-flash",
-  "groq/meta-llama/llama-4-scout-17b-16e-instruct",
-  "anthropic/claude-sonnet-4-6",
-  "openai/gpt-4o-mini",
+const IMAGE_CASCADE: ProviderEntry[] = [
+  {
+    label: "google/gemini-2.5-flash",
+    resolve: () =>
+      ifEnv("GOOGLE_GENERATIVE_AI_API_KEY", () => google("gemini-2.5-flash")),
+  },
+  {
+    label: "groq/llama-4-scout",
+    resolve: () =>
+      ifEnv("GROQ_API_KEY", () =>
+        groq("meta-llama/llama-4-scout-17b-16e-instruct"),
+      ),
+  },
+  {
+    label: "anthropic/claude-sonnet-4-6",
+    resolve: () =>
+      ifEnv("ANTHROPIC_API_KEY", () => anthropic("claude-sonnet-4-6")),
+  },
+  {
+    label: "openai/gpt-4o-mini",
+    resolve: () => ifEnv("OPENAI_API_KEY", () => openai("gpt-4o-mini")),
+  },
 ];
 
 type OcrAttempt = { provider: string; error: string };
 
-/**
- * Try one provider. Returns text on success or an error description on
- * failure. Never throws — failures are returned so the cascade can move
- * on.
- */
 async function tryOcrOnce(
-  modelId: string,
+  entry: ProviderEntry,
   buffer: Buffer,
   mediaType: string,
-): Promise<{ text: string } | { error: string }> {
+): Promise<{ text: string } | { error: string; skipped?: true }> {
+  const model = entry.resolve();
+  if (!model) {
+    return {
+      error: "skipped (API key not set)",
+      skipped: true,
+    };
+  }
   try {
-    const model = resolveModelForUse(modelId) ?? modelId;
     const result = await generateText({
       model,
       messages: [
@@ -92,40 +131,43 @@ async function tryOcrOnce(
     return { text };
   } catch (err) {
     const m = err instanceof Error ? err.message : String(err);
-    // Truncate long upstream errors so the joined cascade summary stays
-    // human-readable.
     return { error: m.length > 240 ? m.slice(0, 240) + "…" : m };
   }
 }
 
-/**
- * Walk the provider cascade and return on the first success. If every
- * provider fails, return empty text with a warning that lists what each
- * one said — that helps the user (or us) diagnose where the cascade is
- * breaking down.
- */
 async function runCascade(
   buffer: Buffer,
   mediaType: string,
-  providers: string[],
+  cascade: ProviderEntry[],
   successNotice?: string,
 ): Promise<OcrResult> {
   const attempts: OcrAttempt[] = [];
-  for (const provider of providers) {
-    const result = await tryOcrOnce(provider, buffer, mediaType);
+  for (const entry of cascade) {
+    const result = await tryOcrOnce(entry, buffer, mediaType);
     if ("text" in result) {
       const warnings: string[] = [];
       if (successNotice) warnings.push(successNotice);
-      if (attempts.length > 0) {
-        // Useful breadcrumb if the FIRST provider failed but a later one
-        // succeeded — the user knows which path worked.
+      const realAttempts = attempts.filter((a) => !a.error.startsWith("skipped"));
+      if (realAttempts.length > 0) {
         warnings.push(
-          `OCR fell through to ${provider} after ${attempts.length} provider(s) declined.`,
+          `OCR fell through to ${entry.label} after ${realAttempts.length} provider(s) declined.`,
         );
       }
-      return { text: result.text, warnings, provider };
+      return { text: result.text, warnings, provider: entry.label };
     }
-    attempts.push({ provider, error: result.error });
+    attempts.push({ provider: entry.label, error: result.error });
+  }
+  // None worked. If EVERY provider was skipped due to missing keys,
+  // surface a cleaner setup message. Otherwise show the per-provider
+  // breakdown.
+  const allSkipped = attempts.every((a) => a.error.startsWith("skipped"));
+  if (allSkipped) {
+    return {
+      text: "",
+      warnings: [
+        "OCR 불가: 어떤 OCR 제공자 키도 설정되어 있지 않습니다. Vercel 환경 변수에 GOOGLE_GENERATIVE_AI_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY, GROQ_API_KEY 중 최소 하나를 추가하세요. / No OCR provider keys configured. Add at least one of: GOOGLE_GENERATIVE_AI_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY, GROQ_API_KEY.",
+      ],
+    };
   }
   const summary = attempts
     .map((a) => `${a.provider}: ${a.error}`)
@@ -138,10 +180,7 @@ async function runCascade(
   };
 }
 
-/**
- * Run vision OCR over an image buffer (JPG / PNG / WEBP / GIF).
- * Never throws.
- */
+/** Run vision OCR over an image buffer. Never throws. */
 export async function ocrImageWithVision(
   buffer: Buffer,
   mediaType: string,
@@ -157,15 +196,12 @@ export async function ocrImageWithVision(
   return runCascade(
     buffer,
     mediaType,
-    IMAGE_PROVIDER_CASCADE,
+    IMAGE_CASCADE,
     "이미지에서 OCR로 텍스트를 추출했습니다. 정확도 확인이 필요할 수 있습니다. / Text was OCR-extracted from an image — verify accuracy.",
   );
 }
 
-/**
- * Run vision OCR over a scanned PDF buffer.
- * Never throws.
- */
+/** Run vision OCR over a scanned PDF buffer. Never throws. */
 export async function ocrPdfWithVision(
   buffer: Buffer,
   pageCount: number | undefined,
@@ -186,5 +222,5 @@ export async function ocrPdfWithVision(
       ],
     };
   }
-  return runCascade(buffer, "application/pdf", PDF_PROVIDER_CASCADE);
+  return runCascade(buffer, "application/pdf", PDF_CASCADE);
 }
