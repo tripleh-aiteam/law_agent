@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { NextIntlClientProvider } from "next-intl";
 import { getMessages, setRequestLocale } from "next-intl/server";
 import { notFound } from "next/navigation";
@@ -8,6 +8,14 @@ import "../globals.css";
 export const metadata: Metadata = {
   title: "Law Agent",
   description: "Find Korean Supreme Court precedents by fact pattern.",
+};
+
+// Mobile-friendly viewport: viewport-fit=cover so safe-area insets work
+// on iOS notch / dynamic island; user can still zoom (no maximum-scale=1).
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
 };
 
 export function generateStaticParams() {

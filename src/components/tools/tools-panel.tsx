@@ -1497,7 +1497,7 @@ function CivilDraftTool(): React.ReactElement {
       </div>
 
       {/* Case identifying fields */}
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Field label="청구 유형 (사건명)" required>
           <input
             value={claimCategory}
@@ -1535,7 +1535,7 @@ function CivilDraftTool(): React.ReactElement {
       </div>
 
       {/* Parties */}
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <PartyForm
           title="원고 (Plaintiff)"
           value={plaintiff}
@@ -1563,7 +1563,7 @@ function CivilDraftTool(): React.ReactElement {
         </p>
       </Field>
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Field label="법적 근거 / 적용 법령 (선택)">
           <textarea
             value={legalBasis}
@@ -1677,7 +1677,7 @@ function PartyForm({
         placeholder="주소 *"
         className="w-full rounded border border-slate-300 bg-white px-2 py-1 text-sm outline-none focus:border-indigo-400"
       />
-      <div className="grid grid-cols-2 gap-2">
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         <input
           value={value.contact ?? ""}
           onChange={(e) => upd({ contact: e.target.value })}

@@ -297,7 +297,15 @@ function FolderNode({
   );
 }
 
-export function Sidebar() {
+export function Sidebar({
+  mobileOpen = false,
+  onCloseMobile,
+}: {
+  /** Whether the off-canvas drawer is currently open on mobile (<md). */
+  mobileOpen?: boolean;
+  /** Called when the drawer should close — backdrop tap, case select, etc. */
+  onCloseMobile?: () => void;
+} = {}) {
   const tCommon = useTranslations("common");
   const tSide = useTranslations("sidebar");
   const { folders, createFolder, createCase, selectCase, currentFolderId } =
@@ -311,23 +319,41 @@ export function Sidebar() {
     setExpandedMap((m) => ({ ...m, [id]: !(m[id] ?? true) }));
   }, []);
 
+  // Wrap selectCase so picking a case on mobile also closes the drawer —
+  // otherwise the user has to tap the case, then the backdrop. We pass
+  // this wrapper down only on mobile to keep desktop unaffected.
+  const selectCaseAndMaybeClose = React.useCallback(
+    (id: string) => {
+      selectCase(id);
+      onCloseMobile?.();
+    },
+    [selectCase, onCloseMobile],
+  );
+
   const handleNewCase = React.useCallback(() => {
     // Target folder = parent of currently-selected case, else first top-level
     // folder, else null (createCase will auto-make an Inbox folder).
     const targetFolderId =
       currentFolderId ?? folders[0]?.id ?? null;
     const newId = createCase(targetFolderId);
-    selectCase(newId);
+    selectCaseAndMaybeClose(newId);
     // Make sure the target folder is expanded so the user sees the new case.
     if (targetFolderId) {
       setExpandedMap((m) => ({ ...m, [targetFolderId]: true }));
     }
     // Immediately enter rename mode for the new case so the user can name it.
     setEditing({ kind: "case", id: newId });
-  }, [currentFolderId, folders, createCase, selectCase]);
+  }, [currentFolderId, folders, createCase, selectCaseAndMaybeClose]);
 
   return (
-    <aside className="flex h-screen w-[280px] shrink-0 flex-col border-r border-slate-200 bg-white">
+    <aside
+      className={cn(
+        "flex h-screen w-[280px] shrink-0 flex-col border-r border-slate-200 bg-white",
+        // Mobile: off-canvas overlay that slides in from the left
+        "fixed inset-y-0 left-0 z-40 transition-transform duration-200 md:static md:translate-x-0",
+        mobileOpen ? "translate-x-0 shadow-2xl" : "-translate-x-full md:shadow-none",
+      )}
+    >
       <div className="flex items-center gap-2 border-b border-slate-200 px-4 py-3.5">
         <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-900 text-white">
           <Scale className="h-4 w-4" aria-hidden />
