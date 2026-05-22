@@ -24,7 +24,7 @@ const HWP_UNSUPPORTED_WARNING =
   "한컴오피스(HWP) 파일은 v1에서 지원하지 않습니다. PDF로 변환 후 다시 업로드해 주세요. / HWP files are not supported in v1; please convert to PDF and re-upload.";
 
 const SCANNED_PDF_WARNING_OCR_TRIED =
-  "PDF appeared to be image-based (scanned). OCR was attempted via Claude vision — text below is OCR output and may contain errors.";
+  "스캔 PDF로 보여 LLM 비전 OCR로 추출했습니다. 오타가 있을 수 있습니다. / PDF appeared to be image-based (scanned). Text was extracted via vision OCR — verify accuracy.";
 
 const SCANNED_PDF_WARNING_OCR_FAILED =
   "PDF appears to be image-based (scanned) and OCR failed. Please re-scan with selectable text or paste the content manually.";

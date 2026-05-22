@@ -321,6 +321,19 @@ function FileDropTextArea({
   );
 }
 
+/** Trigger a file download from a Blob — used by every tool that exports
+ * its result (PII redact, civil draft, contract redline summary, etc.). */
+function triggerDownload(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 /* -------------------------------------------------------------------------- */
 /* PII redact tool                                                             */
 /* -------------------------------------------------------------------------- */
@@ -364,16 +377,48 @@ function PiiRedactTool(): React.ReactElement {
     navigator.clipboard.writeText(result.redactedText);
   };
 
+  const downloadAsTxt = () => {
+    if (!result) return;
+    const blob = new Blob([result.redactedText], {
+      type: "text/plain;charset=utf-8",
+    });
+    triggerDownload(blob, "redacted.txt");
+  };
+
+  const downloadAsWord = () => {
+    if (!result) return;
+    // Word can open HTML directly when given the .doc extension + the MSO
+    // namespace block. Same trick we use elsewhere (case-draft, civil-draft).
+    const escaped = result.redactedText
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+    const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"><title>Redacted</title></head><body><div style="font-family:'바탕','Batang',serif;font-size:11pt;line-height:1.6;white-space:pre-wrap">${escaped}</div></body></html>`;
+    const blob = new Blob(["﻿", html], { type: "application/msword" });
+    triggerDownload(blob, "redacted.doc");
+  };
+
   return (
     <div className="space-y-4">
       <p className="text-[13px] leading-relaxed text-slate-600">
-        문서를 붙여넣으면 주민등록번호, 사업자등록번호, 전화번호, 계좌번호,
-        이메일 등을 자동으로 제거합니다. 정밀 모드는 추가로 LLM이 이름과
-        주소까지 식별합니다.
+        문서를 붙여넣거나 업로드하면 <strong>개인정보(PII)</strong>를 자동으로
+        지운 새 문서를 만들어 줍니다. 상대방·법원·외부 자문 변호사에게
+        파일을 공유하기 전 단계에서 사용하세요.
+        <br />
+        <span className="text-slate-500">
+          • 자동 검출: 주민등록번호 · 외국인등록번호 · 사업자/법인등록번호 ·
+          여권번호 · 전화·이메일 · 계좌·카드번호 · 등기번호/발행번호 ·
+          발급확인번호 · IP · URL.
+          <br />
+          • 정밀 모드 추가 검출: 한국어·외국어 인명, 전체 주소.
+          <br />
+          • 결과는 텍스트 / Word(.doc) / 클립보드로 내보낼 수 있습니다.
+        </span>
         <br />
         <span className="text-slate-400">
-          Paste a document — PII patterns (RRN, phone, accounts, etc.) are
-          stripped. Thorough mode also catches names + addresses via LLM.
+          Paste or upload a document — the tool returns the same content with
+          personal data masked. Use before sharing with opposing counsel,
+          the court, or outside firms.
         </span>
       </p>
 
@@ -439,18 +484,36 @@ function PiiRedactTool(): React.ReactElement {
             ))}
           </div>
           <div className="rounded-lg border border-slate-200 bg-white">
-            <div className="flex items-center justify-between border-b border-slate-100 px-3 py-1.5">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-3 py-1.5">
               <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                Redacted output
+                Redacted output / 개인정보 제거 결과
               </span>
-              <button
-                type="button"
-                onClick={copyRedacted}
-                className="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700"
-              >
-                <Copy className="h-3 w-3" aria-hidden />
-                복사 / Copy
-              </button>
+              <div className="flex flex-wrap items-center gap-1">
+                <button
+                  type="button"
+                  onClick={copyRedacted}
+                  className="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700"
+                >
+                  <Copy className="h-3 w-3" aria-hidden />
+                  복사 / Copy
+                </button>
+                <button
+                  type="button"
+                  onClick={downloadAsTxt}
+                  className="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700"
+                >
+                  <Download className="h-3 w-3" aria-hidden />
+                  TXT
+                </button>
+                <button
+                  type="button"
+                  onClick={downloadAsWord}
+                  className="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700"
+                >
+                  <Download className="h-3 w-3" aria-hidden />
+                  Word (.doc)
+                </button>
+              </div>
             </div>
             <pre className="max-h-[420px] overflow-y-auto whitespace-pre-wrap p-3 text-[13px] leading-relaxed text-slate-800">
               {result.redactedText}
