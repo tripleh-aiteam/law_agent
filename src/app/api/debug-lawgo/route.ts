@@ -17,11 +17,29 @@ export async function GET(req: Request): Promise<Response> {
     return NextResponse.json({ error: "LAW_GO_KR_API_KEY not set" }, { status: 500 });
   }
 
+  // Diagnostic endpoint — only enable in dev or when explicitly opted in via
+  // an env flag. In production, we never expose law.go.kr URLs (the OC param
+  // is the API key).
+  if (
+    process.env.NODE_ENV === "production" &&
+    process.env.ALLOW_DEBUG_ENDPOINTS !== "1"
+  ) {
+    return NextResponse.json(
+      { error: "Debug endpoint disabled in production" },
+      { status: 404 },
+    );
+  }
+
   const proto = url.searchParams.get("proto") ?? "https";
   const lawgoUrl =
     `${proto}://www.law.go.kr/DRF/lawSearch.do?` +
     `OC=${encodeURIComponent(apiKey)}` +
     `&target=prec&type=JSON&query=${encodeURIComponent(cn)}`;
+  // Redacted version that's safe to echo to the caller.
+  const lawgoUrlRedacted = lawgoUrl.replace(
+    /OC=[^&]+/,
+    `OC=${apiKey.slice(0, 4)}***`,
+  );
 
   try {
     const t0 = Date.now();
@@ -41,7 +59,7 @@ export async function GET(req: Request): Promise<Response> {
       containsCaseNumber = text.includes(cn);
     }
     return NextResponse.json({
-      url: lawgoUrl,
+      url: lawgoUrlRedacted,
       caseNumber: cn,
       apiKeyPrefix: apiKey.slice(0, 4),
       status: resp.status,
@@ -53,7 +71,7 @@ export async function GET(req: Request): Promise<Response> {
     });
   } catch (err: unknown) {
     return NextResponse.json({
-      url: lawgoUrl,
+      url: lawgoUrlRedacted,
       caseNumber: cn,
       error: err instanceof Error ? err.message : String(err),
     }, { status: 500 });
