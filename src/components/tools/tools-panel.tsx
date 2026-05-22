@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { createPortal } from "react-dom";
 import { useLocale } from "next-intl";
 import {
   AlertTriangle,
@@ -50,8 +51,19 @@ export function ToolsPanel({
   tool: ToolsPanelTool;
   onClose: () => void;
 }): React.ReactElement | null {
-  if (!tool) return null;
-  return (
+  // The page header has `backdrop-blur-sm` (a CSS backdrop-filter),
+  // which makes it a containing block for `position: fixed`
+  // descendants. Rendering this overlay inline would trap it to the
+  // 56px-tall header bar — so we portal it to <body> instead, where
+  // no ancestor can interfere.
+  const [mounted, setMounted] = React.useState(false);
+  React.useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  if (!tool || !mounted) return null;
+
+  const panel = (
     <div className="fixed inset-0 z-50 flex">
       {/* Backdrop */}
       <div
@@ -101,6 +113,8 @@ export function ToolsPanel({
       </aside>
     </div>
   );
+
+  return createPortal(panel, document.body);
 }
 
 /* -------------------------------------------------------------------------- */
