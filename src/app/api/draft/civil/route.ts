@@ -3,7 +3,7 @@ import { z } from "zod";
 import { draftCivilDocument } from "@/lib/court-draft";
 
 export const runtime = "nodejs";
-export const maxDuration = 180;
+export const maxDuration = 800;
 
 const PartyInputSchema = z.object({
   name: z.string().min(1, "이름은 필수입니다 / name required"),

@@ -6,7 +6,7 @@ import {
 } from "@/lib/file-extractor";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 800;
 
 const MAX_FILES_PER_REQUEST = 5;
 const MAX_TOTAL_BYTES = 40 * 1024 * 1024; // 40 MB

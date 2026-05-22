@@ -337,8 +337,20 @@ function BranchBody({
 }): React.ReactElement {
   const t = useTranslations("chat");
   const locale = useLocale() as "ko" | "en";
-  const { setBestBranch, currentCaseId } = useCases();
+  const { setBestBranch, currentCaseId, currentCase } = useCases();
   const [showDetails, setShowDetails] = React.useState(false);
+  const [downloadOpen, setDownloadOpen] = React.useState(false);
+  const downloadMenuRef = React.useRef<HTMLDivElement>(null);
+  React.useEffect(() => {
+    if (!downloadOpen) return;
+    const onClick = (e: MouseEvent) => {
+      if (!downloadMenuRef.current?.contains(e.target as Node)) {
+        setDownloadOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [downloadOpen]);
 
   if (branch.status === "pending") {
     // Manus is an autonomous agent — its tasks take MINUTES, not seconds.
@@ -407,15 +419,53 @@ function BranchBody({
               {modelShortName(branch.modelId)} · {t("answerSummary")}
             </div>
             <div className="flex items-center gap-1">
-              <button
-                type="button"
-                onClick={() => downloadBranchAnswer(turn, branch)}
-                className="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium text-slate-500 transition-colors hover:bg-slate-100 hover:text-indigo-700"
-                title={t("downloadTooltip")}
-              >
-                <Download className="h-3 w-3" aria-hidden />
-                {t("download")}
-              </button>
+              <div className="relative" ref={downloadMenuRef}>
+                <button
+                  type="button"
+                  onClick={() => setDownloadOpen((v) => !v)}
+                  className="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium text-slate-500 transition-colors hover:bg-slate-100 hover:text-indigo-700"
+                  title={t("downloadTooltip")}
+                >
+                  <Download className="h-3 w-3" aria-hidden />
+                  {t("download")}
+                  <ChevronDown className="h-3 w-3" aria-hidden />
+                </button>
+                {downloadOpen && (
+                  <div className="absolute right-0 top-full z-20 mt-1 min-w-[200px] overflow-hidden rounded-md border border-slate-200 bg-white shadow-lg">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDownloadOpen(false);
+                        downloadCaseAsWord(currentCase, turn, branch);
+                      }}
+                      className="block w-full px-3 py-2 text-left text-xs text-slate-700 hover:bg-indigo-50 hover:text-indigo-700"
+                    >
+                      📄 Word (.doc) — 전체 대화 / Full conversation
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDownloadOpen(false);
+                        downloadCaseAsPdf(currentCase, turn, branch);
+                      }}
+                      className="block w-full px-3 py-2 text-left text-xs text-slate-700 hover:bg-indigo-50 hover:text-indigo-700"
+                    >
+                      📕 PDF — 전체 대화 / Full conversation
+                    </button>
+                    <div className="border-t border-slate-100" />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDownloadOpen(false);
+                        downloadBranchAnswer(turn, branch);
+                      }}
+                      className="block w-full px-3 py-2 text-left text-xs text-slate-500 hover:bg-slate-50"
+                    >
+                      📋 Word (.doc) — 이 답변만 / Only this answer
+                    </button>
+                  </div>
+                )}
+              </div>
               <button
                 type="button"
                 onClick={() =>
@@ -558,6 +608,216 @@ function nl2br(s: string | undefined | null): string {
  * Filename pattern:
  *   law-agent_{model}_{YYYY-MM-DD}_{HH-MM}.doc
  */
+/**
+ * Bundle the ENTIRE case conversation (every Q + every A from every model,
+ * including chip-triggered follow-ups like 사례 요약 / 상세 분석 /
+ * 반대 측 예상 논거) into one Word .doc and trigger a download.
+ */
+function downloadCaseAsWord(
+  caseObj: ReturnType<typeof useCases>["currentCase"],
+  triggerTurn: CaseTurn,
+  triggerBranch: TurnBranch,
+): void {
+  if (!caseObj) {
+    downloadBranchAnswer(triggerTurn, triggerBranch);
+    return;
+  }
+  const { html, filename } = buildFullConversationHtml(caseObj, ".doc");
+  const blob = new Blob([html], {
+    type: "application/msword;charset=utf-8",
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/**
+ * Open a printable rendering of the full case conversation in a new
+ * window and trigger the browser's print dialog. The user picks
+ * "Save as PDF" as the destination. No PDF library needed — every
+ * modern browser exposes high-quality PDF rendering through its print
+ * pipeline.
+ *
+ * Implementation note: we serve the HTML via a Blob URL rather than
+ * `document.write` so the new window has a real document origin and
+ * doesn't trip XSS/CSP heuristics.
+ */
+function downloadCaseAsPdf(
+  caseObj: ReturnType<typeof useCases>["currentCase"],
+  triggerTurn: CaseTurn,
+  triggerBranch: TurnBranch,
+): void {
+  if (!caseObj) {
+    downloadBranchAnswer(triggerTurn, triggerBranch);
+    return;
+  }
+  const { html } = buildFullConversationHtml(caseObj, ".pdf");
+  const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const win = window.open(url, "_blank", "width=900,height=1100");
+  if (!win) {
+    alert(
+      "팝업이 차단되었습니다. PDF 인쇄 창을 열기 위해 이 사이트의 팝업을 허용해 주세요. / Pop-ups blocked. Allow pop-ups for this site to use PDF export, or use Word download instead.",
+    );
+    URL.revokeObjectURL(url);
+    return;
+  }
+  // Revoke the blob URL after the new window has had time to load it.
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
+/**
+ * Build the HTML for either a Word .doc download or a browser-print PDF
+ * window. Both render the same content: every turn (Q + every branch's
+ * answer + precedent matches), grouped per turn, oldest at top.
+ */
+function buildFullConversationHtml(
+  caseObj: NonNullable<ReturnType<typeof useCases>["currentCase"]>,
+  ext: ".doc" | ".pdf",
+): { html: string; filename: string } {
+  const now = new Date();
+  const pad = (n: number) => n.toString().padStart(2, "0");
+  const stamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_${pad(now.getHours())}-${pad(now.getMinutes())}`;
+  const caseName = caseObj.nameKey ?? caseObj.name ?? "case";
+  const sanitized = caseName.replace(/[^\p{L}\p{N}_-]+/gu, "-").slice(0, 60);
+  const filename = `law-agent_${sanitized || "case"}_${stamp}${ext}`;
+
+  const allTurns = caseObj.turns ?? [];
+
+  const turnBlocks = allTurns
+    .map((turn, idx) => {
+      const branches = turn.branches ?? [];
+      const branchBlocks = branches
+        .map((branch) => {
+          const modelName = resolveModel(branch.modelId).displayName;
+          const isBest = turn.bestBranchModelId === branch.modelId;
+          const bestBadge = isBest
+            ? `<span class="best-badge">⭐ Best</span>`
+            : "";
+          if (branch.status === "error") {
+            return `
+              <div class="branch error-branch">
+                <div class="branch-head">${esc(modelName)} ${bestBadge}<span class="status-pill status-error">Error</span></div>
+                <p class="error">${esc(branch.error ?? "")}</p>
+              </div>`;
+          }
+          if (branch.status === "pending") {
+            return `
+              <div class="branch">
+                <div class="branch-head">${esc(modelName)} ${bestBadge}<span class="status-pill status-pending">In progress</span></div>
+              </div>`;
+          }
+          const matches = branch.matches ?? [];
+          const matchBlocks =
+            matches.length > 0
+              ? `<h4>Precedents (${matches.length})</h4>` +
+                matches
+                  .map((m, i) => {
+                    const p = m.precedent;
+                    const tier = m.citability ?? (m.citable ? "supporting" : "weak");
+                    const tierLabel =
+                      tier === "strong"
+                        ? "강한 권위 / Strong"
+                        : tier === "supporting"
+                          ? "참고 자료 / Supporting"
+                          : "제한 적용 / Limited";
+                    return `
+                      <div class="precedent">
+                        <div class="precedent-head">${i + 1}. ${esc(p.caseTitle)} <span class="citability citability-${tier}">${tierLabel}</span></div>
+                        <div class="meta-row"><b>Case number:</b> ${esc(p.caseNumber)}</div>
+                        <div class="meta-row"><b>Court:</b> ${esc(p.court)}</div>
+                        <div class="meta-row"><b>Decision:</b> ${esc(p.decisionDate)}</div>
+                        <p><b>Holding (판시사항):</b><br>${nl2br(p.holding)}</p>
+                        <p><b>Summary (판결요지):</b><br>${nl2br(p.summary)}</p>
+                        <p><b>Why it matches:</b><br>${nl2br(m.whyMatches)}</p>
+                      </div>`;
+                  })
+                  .join("")
+              : "";
+          return `
+            <div class="branch">
+              <div class="branch-head">${esc(modelName)} ${bestBadge}</div>
+              <div class="answer">${nl2br(branch.summary ?? "")}</div>
+              ${matchBlocks}
+            </div>`;
+        })
+        .join("");
+      return `
+        <section class="turn">
+          <div class="q-head">Q${idx + 1} · ${esc(new Date(turn.createdAt).toLocaleString())}</div>
+          <div class="q-text">${nl2br(turn.question)}</div>
+          ${
+            turn.attachmentNames && turn.attachmentNames.length > 0
+              ? `<div class="attachments"><b>Attachments:</b> ${esc(turn.attachmentNames.join(", "))}</div>`
+              : ""
+          }
+          ${branchBlocks}
+        </section>`;
+    })
+    .join("");
+
+  const printAutoTrigger =
+    ext === ".pdf"
+      ? `<script>window.addEventListener('load',function(){setTimeout(function(){window.print()},300)});</script>`
+      : "";
+
+  const html = `<!DOCTYPE html>
+<html xmlns:o="urn:schemas-microsoft-com:office:office"
+      xmlns:w="urn:schemas-microsoft-com:office:word"
+      xmlns="http://www.w3.org/TR/REC-html40">
+<head>
+<meta charset="utf-8">
+<title>Law Agent — ${esc(caseName)}</title>
+<style>
+  @page { size: A4; margin: 0.9in; }
+  body { font-family: "Calibri", "Malgun Gothic", "맑은 고딕", sans-serif; font-size: 11pt; color: #1a1a1a; }
+  h1 { font-size: 22pt; margin: 0 0 4pt; color: #111; }
+  h2 { font-size: 14pt; margin: 18pt 0 6pt; color: #4f46e5; border-bottom: 1pt solid #ddd; padding-bottom: 4pt; }
+  h3 { font-size: 12pt; margin: 14pt 0 4pt; color: #333; }
+  h4 { font-size: 11pt; margin: 10pt 0 3pt; color: #555; }
+  p { margin: 0 0 6pt; line-height: 1.55; }
+  .doc-meta { color: #6b7280; font-size: 10pt; margin-bottom: 18pt; padding-bottom: 8pt; border-bottom: 1pt solid #e5e7eb; }
+  .turn { margin-top: 22pt; padding-top: 10pt; border-top: 2pt solid #e5e7eb; page-break-inside: avoid; }
+  .q-head { color: #6b7280; font-size: 10pt; margin-bottom: 4pt; }
+  .q-text { font-size: 13pt; font-weight: 600; color: #0f172a; background: #f1f5f9; padding: 8pt 10pt; border-left: 3pt solid #4f46e5; margin-bottom: 12pt; white-space: pre-wrap; }
+  .attachments { color: #475569; font-size: 10pt; margin-bottom: 8pt; }
+  .branch { margin-bottom: 14pt; padding: 10pt 12pt; border: 1pt solid #e5e7eb; border-radius: 4pt; background: #fafbfc; page-break-inside: avoid; }
+  .branch-head { color: #4f46e5; font-weight: 600; font-size: 11pt; margin-bottom: 6pt; }
+  .best-badge { background: #fef3c7; color: #92400e; padding: 1pt 6pt; border-radius: 4pt; font-size: 9pt; margin-left: 6pt; }
+  .status-pill { display: inline-block; padding: 1pt 6pt; border-radius: 999px; font-size: 9pt; margin-left: 6pt; }
+  .status-error { background: #fee2e2; color: #991b1b; }
+  .status-pending { background: #e0e7ff; color: #3730a3; }
+  .answer { white-space: pre-wrap; line-height: 1.6; margin-bottom: 8pt; }
+  .error { color: #991b1b; background: #fef2f2; padding: 6pt; border-radius: 4pt; }
+  .precedent { margin: 8pt 0; padding: 8pt; border-left: 2pt solid #d1d5db; background: #ffffff; }
+  .precedent-head { font-weight: 600; margin-bottom: 4pt; }
+  .meta-row { font-size: 10pt; color: #475569; margin-bottom: 2pt; }
+  .citability { display: inline-block; padding: 1pt 6pt; border-radius: 999px; font-size: 9pt; font-weight: bold; margin-left: 4pt; }
+  .citability-strong { background: #d1fae5; color: #065f46; }
+  .citability-supporting { background: #fef3c7; color: #92400e; }
+  .citability-weak { background: #f3f4f6; color: #6b7280; }
+</style>
+</head>
+<body>
+  <h1>Law Agent — ${esc(caseName)}</h1>
+  <div class="doc-meta">
+    <div><b>Generated:</b> ${esc(now.toLocaleString())}</div>
+    <div><b>Total questions:</b> ${allTurns.length}</div>
+    <div><b>Includes:</b> 사례 요약 / 상세 분석 / 반대 측 예상 논거 / 적용 법령 — every Q + every model's answer.</div>
+  </div>
+  ${turnBlocks}
+  ${printAutoTrigger}
+</body>
+</html>`;
+
+  return { html, filename };
+}
+
 function downloadBranchAnswer(turn: CaseTurn, branch: TurnBranch): void {
   const modelName = resolveModel(branch.modelId).displayName;
   const sanitizedModel = modelName

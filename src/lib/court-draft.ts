@@ -17,7 +17,7 @@ import { EXTRACTION_MODEL } from "./ai";
 import { resolveModelForUse } from "./resolve-model";
 import { safeModelId } from "./models";
 
-const TIMEOUT_MS = 180_000;
+const TIMEOUT_MS = 720_000;
 
 /* -------------------------------------------------------------------------- */
 /* Schemas                                                                     */

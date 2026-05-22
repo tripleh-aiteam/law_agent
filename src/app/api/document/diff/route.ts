@@ -8,7 +8,7 @@ import {
 import { EXTRACTION_MODEL } from "@/lib/ai";
 
 export const runtime = "nodejs";
-export const maxDuration = 120;
+export const maxDuration = 800;
 
 const BodySchema = z.object({
   original: z.string().min(1, "original text is required"),

@@ -3,7 +3,7 @@ import { z } from "zod";
 import { redactPii } from "@/lib/pii-redact";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 800;
 
 const BodySchema = z.object({
   text: z.string().min(1, "text is required"),

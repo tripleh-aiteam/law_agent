@@ -7,7 +7,7 @@ import { safeModelId } from "@/lib/models";
 import { resolveModelForUse } from "@/lib/resolve-model";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 800;
 
 const BodySchema = z.object({
   narrative: z.string().min(10, "narrative must be at least 10 characters"),
@@ -121,7 +121,7 @@ export async function POST(req: Request): Promise<Response> {
       schema: DetailedSchema,
       system: SYSTEM_PROMPT,
       prompt: userPrompt,
-      abortSignal: AbortSignal.timeout(55_000),
+      abortSignal: AbortSignal.timeout(720_000),
       maxOutputTokens: 3072,
     });
     return NextResponse.json(result.object);

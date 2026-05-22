@@ -3,7 +3,7 @@ import { z } from "zod";
 import { reviewContract } from "@/lib/contract-redline";
 
 export const runtime = "nodejs";
-export const maxDuration = 180;
+export const maxDuration = 800;
 
 const BodySchema = z.object({
   text: z.string().min(50, "Contract text must be at least 50 characters."),

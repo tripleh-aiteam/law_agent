@@ -29,7 +29,7 @@ import { google } from "@ai-sdk/google";
 import { openai } from "@ai-sdk/openai";
 import { groq } from "@ai-sdk/groq";
 
-const OCR_TIMEOUT_MS = 90_000;
+const OCR_TIMEOUT_MS = 240_000;
 const MAX_OCR_BYTES = 32 * 1024 * 1024; // 32 MB (PDF)
 const MAX_OCR_PAGES = 100;
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 5 MB (per-image)
