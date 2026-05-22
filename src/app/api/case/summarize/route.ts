@@ -102,7 +102,7 @@ export async function POST(req: Request): Promise<Response> {
       schema: SummarySchema,
       system: SYSTEM_PROMPT,
       prompt: userPrompt,
-      abortSignal: AbortSignal.timeout(720_000),
+      abortSignal: AbortSignal.timeout(800_000),
       maxOutputTokens: 1024,
     });
     return NextResponse.json(result.object);

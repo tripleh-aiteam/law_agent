@@ -131,11 +131,11 @@ CLARIFYING QUESTIONS RULES:
 - "why" explains in 1 sentence how the answer would change which 판례 are citable.
 - IDs are stable snake_case identifiers (e.g. q_party_type, q_written_agreement, q_jurisdiction, q_timeline_gap, q_prior_litigation).`;
 
-// 720s — large documents on Manus / long contracts can take 4-8 minutes
-// to extract. Matches the Vercel maxDuration (800s) minus a small safety
-// margin so the extractor self-aborts BEFORE the function gets killed
-// (so the user gets a clean error instead of a generic 504).
-const TIMEOUT_MS = 720_000;
+// 800s — exactly the Vercel Pro maxDuration. The platform is the only
+// hard ceiling; this app-level timeout matches it so we don't pre-empt
+// the platform with a stricter limit. (Vercel's 800s is a hard platform
+// limit — there is no plan or config that lifts it further.)
+const TIMEOUT_MS = 800_000;
 
 /**
  * Cap the narrative sent to the LLM. Large PDFs combined with the question

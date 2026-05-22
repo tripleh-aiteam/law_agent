@@ -32,7 +32,7 @@ const POLL_INTERVAL_MS = 2_000;
  * Previously 180s was bailing on tasks that were genuinely still
  * producing the long required output.
  */
-const POLL_MAX_MS = 720_000;
+const POLL_MAX_MS = 800_000; // matches Vercel maxDuration — platform is the only ceiling
 /**
  * If Manus is stuck in an "awaiting user input" state we want to bail
  * early — but ONLY when the assistant's last message clearly looks

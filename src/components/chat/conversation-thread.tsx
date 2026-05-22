@@ -431,37 +431,61 @@ function BranchBody({
                   <ChevronDown className="h-3 w-3" aria-hidden />
                 </button>
                 {downloadOpen && (
-                  <div className="absolute right-0 top-full z-20 mt-1 min-w-[200px] overflow-hidden rounded-md border border-slate-200 bg-white shadow-lg">
+                  <div className="absolute right-0 top-full z-20 mt-1 min-w-[260px] overflow-hidden rounded-md border border-slate-200 bg-white shadow-lg">
+                    <div className="border-b border-slate-100 bg-slate-50 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                      {modelShortName(branch.modelId)} —
+                      모든 답변 (요약·상세·반대 측 논거 포함)
+                    </div>
                     <button
                       type="button"
                       onClick={() => {
                         setDownloadOpen(false);
-                        downloadCaseAsWord(currentCase, turn, branch);
+                        downloadCaseAsWord(
+                          currentCase,
+                          turn,
+                          branch,
+                          branch.modelId,
+                        );
                       }}
                       className="block w-full px-3 py-2 text-left text-xs text-slate-700 hover:bg-indigo-50 hover:text-indigo-700"
                     >
-                      📄 Word (.doc) — 전체 대화 / Full conversation
+                      📄 Word (.doc) — {modelShortName(branch.modelId)} only
                     </button>
                     <button
                       type="button"
                       onClick={() => {
                         setDownloadOpen(false);
-                        downloadCaseAsPdf(currentCase, turn, branch);
+                        downloadCaseAsPdf(
+                          currentCase,
+                          turn,
+                          branch,
+                          branch.modelId,
+                        );
                       }}
                       className="block w-full px-3 py-2 text-left text-xs text-slate-700 hover:bg-indigo-50 hover:text-indigo-700"
                     >
-                      📕 PDF — 전체 대화 / Full conversation
+                      📕 PDF — {modelShortName(branch.modelId)} only
                     </button>
                     <div className="border-t border-slate-100" />
                     <button
                       type="button"
                       onClick={() => {
                         setDownloadOpen(false);
-                        downloadBranchAnswer(turn, branch);
+                        downloadCaseAsWord(currentCase, turn, branch, null);
                       }}
                       className="block w-full px-3 py-2 text-left text-xs text-slate-500 hover:bg-slate-50"
                     >
-                      📋 Word (.doc) — 이 답변만 / Only this answer
+                      📄 Word — 모든 LLM 비교 / All models
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDownloadOpen(false);
+                        downloadCaseAsPdf(currentCase, turn, branch, null);
+                      }}
+                      className="block w-full px-3 py-2 text-left text-xs text-slate-500 hover:bg-slate-50"
+                    >
+                      📕 PDF — 모든 LLM 비교 / All models
                     </button>
                   </div>
                 )}
@@ -609,20 +633,31 @@ function nl2br(s: string | undefined | null): string {
  *   law-agent_{model}_{YYYY-MM-DD}_{HH-MM}.doc
  */
 /**
- * Bundle the ENTIRE case conversation (every Q + every A from every model,
- * including chip-triggered follow-ups like 사례 요약 / 상세 분석 /
- * 반대 측 예상 논거) into one Word .doc and trigger a download.
+ * Bundle the case conversation into a Word .doc.
+ *
+ * `modelFilter`:
+ *   - When set to a modelId, ONLY that model's branch from each turn is
+ *     included — so a Llama 4 Scout download contains every Q + Llama's
+ *     answer for every chip follow-up (사례 요약 · 상세 분석 · 반대 측
+ *     예상 논거), and nothing from Sonnet / GPT.
+ *   - When null, every branch from every model is included (the "All
+ *     models" comparison export).
  */
 function downloadCaseAsWord(
   caseObj: ReturnType<typeof useCases>["currentCase"],
   triggerTurn: CaseTurn,
   triggerBranch: TurnBranch,
+  modelFilter: string | null,
 ): void {
   if (!caseObj) {
     downloadBranchAnswer(triggerTurn, triggerBranch);
     return;
   }
-  const { html, filename } = buildFullConversationHtml(caseObj, ".doc");
+  const { html, filename } = buildFullConversationHtml(
+    caseObj,
+    ".doc",
+    modelFilter,
+  );
   const blob = new Blob([html], {
     type: "application/msword;charset=utf-8",
   });
@@ -651,12 +686,13 @@ function downloadCaseAsPdf(
   caseObj: ReturnType<typeof useCases>["currentCase"],
   triggerTurn: CaseTurn,
   triggerBranch: TurnBranch,
+  modelFilter: string | null,
 ): void {
   if (!caseObj) {
     downloadBranchAnswer(triggerTurn, triggerBranch);
     return;
   }
-  const { html } = buildFullConversationHtml(caseObj, ".pdf");
+  const { html } = buildFullConversationHtml(caseObj, ".pdf", modelFilter);
   const blob = new Blob([html], { type: "text/html;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const win = window.open(url, "_blank", "width=900,height=1100");
@@ -679,19 +715,34 @@ function downloadCaseAsPdf(
 function buildFullConversationHtml(
   caseObj: NonNullable<ReturnType<typeof useCases>["currentCase"]>,
   ext: ".doc" | ".pdf",
+  modelFilter: string | null,
 ): { html: string; filename: string } {
   const now = new Date();
   const pad = (n: number) => n.toString().padStart(2, "0");
   const stamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_${pad(now.getHours())}-${pad(now.getMinutes())}`;
   const caseName = caseObj.nameKey ?? caseObj.name ?? "case";
   const sanitized = caseName.replace(/[^\p{L}\p{N}_-]+/gu, "-").slice(0, 60);
-  const filename = `law-agent_${sanitized || "case"}_${stamp}${ext}`;
+  const modelLabel = modelFilter ? resolveModel(modelFilter).displayName : null;
+  const modelSlug = modelLabel
+    ? modelLabel.replace(/[^\p{L}\p{N}_-]+/gu, "-").slice(0, 30)
+    : "all-models";
+  const filename = `law-agent_${sanitized || "case"}_${modelSlug}_${stamp}${ext}`;
 
   const allTurns = caseObj.turns ?? [];
 
   const turnBlocks = allTurns
     .map((turn, idx) => {
-      const branches = turn.branches ?? [];
+      const rawBranches = turn.branches ?? [];
+      // When the user picked one model, drop branches from other models so
+      // the export is single-model (e.g. only Llama answers across every
+      // Q + chip follow-up). Otherwise keep all branches for a side-by-side
+      // comparison export.
+      const branches = modelFilter
+        ? rawBranches.filter((b) => b.modelId === modelFilter)
+        : rawBranches;
+      // If filtering and this turn has nothing for the chosen model, drop
+      // the whole turn block — we don't want orphan Q's with no A.
+      if (modelFilter && branches.length === 0) return "";
       const branchBlocks = branches
         .map((branch) => {
           const modelName = resolveModel(branch.modelId).displayName;
@@ -808,7 +859,8 @@ function buildFullConversationHtml(
   <div class="doc-meta">
     <div><b>Generated:</b> ${esc(now.toLocaleString())}</div>
     <div><b>Total questions:</b> ${allTurns.length}</div>
-    <div><b>Includes:</b> 사례 요약 / 상세 분석 / 반대 측 예상 논거 / 적용 법령 — every Q + every model's answer.</div>
+    <div><b>Model scope:</b> ${esc(modelLabel ?? "All models (comparison)")}</div>
+    <div><b>Includes:</b> 사례 요약 / 상세 분석 / 반대 측 예상 논거 / 적용 법령 — every Q + the selected model's answer.</div>
   </div>
   ${turnBlocks}
   ${printAutoTrigger}
