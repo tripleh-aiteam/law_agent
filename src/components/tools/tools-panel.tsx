@@ -118,6 +118,195 @@ export function ToolsPanel({
 }
 
 /* -------------------------------------------------------------------------- */
+/* Shared input — textarea + click-upload + drag-and-drop                      */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Reusable text-input block used by every tool that accepts a document.
+ * Supports three ways to get content in:
+ *   1. Type / paste directly into the textarea (Ctrl+V works as expected)
+ *   2. Click the upload button to pick a PDF / DOCX / TXT
+ *   3. Drag a file from the OS file manager and drop it on the textarea
+ *
+ * File text extraction goes through /api/upload (same pipeline used by chat
+ * attachments — pdf-parse, mammoth, Claude vision OCR fallback).
+ */
+function FileDropTextArea({
+  value,
+  onChange,
+  placeholder,
+  rows = 10,
+  className,
+  disabled,
+  onError,
+  onBusyChange,
+  accept = ".pdf,.docx,.txt,.md",
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  rows?: number;
+  className?: string;
+  disabled?: boolean;
+  onError?: (msg: string) => void;
+  onBusyChange?: (busy: boolean) => void;
+  accept?: string;
+}): React.ReactElement {
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const [filename, setFilename] = React.useState<string | null>(null);
+  const [dragging, setDragging] = React.useState(false);
+  const [extracting, setExtracting] = React.useState(false);
+
+  const extractFile = React.useCallback(
+    async (file: File) => {
+      setExtracting(true);
+      onBusyChange?.(true);
+      try {
+        const formData = new FormData();
+        formData.append("files", file);
+        const res = await fetch("/api/upload", {
+          method: "POST",
+          body: formData,
+        });
+        if (!res.ok) {
+          const body = (await res.json().catch(() => null)) as {
+            error?: string;
+          } | null;
+          throw new Error(body?.error ?? `HTTP ${res.status}`);
+        }
+        const data = (await res.json()) as {
+          files: Array<{ text: string; warnings?: string[] }>;
+        };
+        const text = data.files?.[0]?.text ?? "";
+        if (!text.trim()) {
+          throw new Error(
+            "파일에서 텍스트를 추출할 수 없습니다. / No text could be extracted from the uploaded file.",
+          );
+        }
+        onChange(text);
+        setFilename(file.name);
+      } catch (err) {
+        onError?.(err instanceof Error ? err.message : String(err));
+      } finally {
+        setExtracting(false);
+        onBusyChange?.(false);
+      }
+    },
+    [onChange, onError, onBusyChange],
+  );
+
+  const onFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    await extractFile(file);
+    e.target.value = "";
+  };
+
+  const onDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!disabled && !extracting) setDragging(true);
+  };
+
+  const onDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragging(false);
+  };
+
+  const onDrop = async (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragging(false);
+    if (disabled || extracting) return;
+    const file = e.dataTransfer.files?.[0];
+    if (!file) return;
+    await extractFile(file);
+  };
+
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept={accept}
+          hidden
+          onChange={onFileChange}
+        />
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={disabled || extracting}
+          className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {extracting ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+          ) : (
+            <Paperclip className="h-3.5 w-3.5" aria-hidden />
+          )}
+          파일 업로드 / Upload (PDF · DOCX · TXT)
+        </button>
+        <span className="text-[11px] text-slate-500">
+          또는 끌어다 놓기 · 또는 붙여넣기 / or drag &amp; drop · or paste
+        </span>
+        {filename && (
+          <span className="ml-auto inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-700">
+            📎 {filename}
+            <button
+              type="button"
+              onClick={() => {
+                setFilename(null);
+                onChange("");
+              }}
+              className="text-slate-400 hover:text-slate-600"
+              aria-label="Clear uploaded file"
+            >
+              <X className="h-3 w-3" aria-hidden />
+            </button>
+          </span>
+        )}
+      </div>
+
+      <div
+        onDragOver={onDragOver}
+        onDragLeave={onDragLeave}
+        onDrop={onDrop}
+        className={cn(
+          "relative rounded-lg border-2 border-dashed transition-colors",
+          dragging
+            ? "border-indigo-400 bg-indigo-50/60"
+            : "border-transparent",
+        )}
+      >
+        <textarea
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={placeholder}
+          rows={rows}
+          disabled={disabled || extracting}
+          className={cn(
+            "block w-full resize-y rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-slate-400 focus:bg-white disabled:opacity-60",
+            className,
+          )}
+        />
+        {dragging && (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-lg bg-indigo-50/90 text-sm font-medium text-indigo-700">
+            📎 파일을 여기에 놓으세요 / Drop file here
+          </div>
+        )}
+        {extracting && !dragging && (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-lg bg-white/70 text-sm font-medium text-slate-700">
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
+            파일에서 텍스트 추출 중… / Extracting text…
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
 /* PII redact tool                                                             */
 /* -------------------------------------------------------------------------- */
 
@@ -173,12 +362,13 @@ function PiiRedactTool(): React.ReactElement {
         </span>
       </p>
 
-      <textarea
+      <FileDropTextArea
         value={input}
-        onChange={(e) => setInput(e.target.value)}
-        placeholder="문서 본문을 여기에 붙여넣으세요... / Paste document content here..."
+        onChange={setInput}
+        placeholder="문서 본문을 여기에 붙여넣거나 파일을 업로드하세요... / Paste content here or upload a file..."
         rows={10}
-        className="block w-full resize-y rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-slate-400 focus:bg-white"
+        disabled={busy}
+        onError={setError}
       />
 
       <div className="flex items-center justify-between gap-3">
@@ -517,40 +707,6 @@ function ContractRedlineTool(): React.ReactElement {
   const [busy, setBusy] = React.useState(false);
   const [result, setResult] = React.useState<RedlineResult | null>(null);
   const [error, setError] = React.useState<string | null>(null);
-  const [filename, setFilename] = React.useState<string | null>(null);
-  const fileInputRef = React.useRef<HTMLInputElement>(null);
-
-  const onPickFile = () => fileInputRef.current?.click();
-
-  const onFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setFilename(file.name);
-    setError(null);
-    setBusy(true);
-    try {
-      const formData = new FormData();
-      formData.append("files", file);
-      const res = await fetch("/api/upload", { method: "POST", body: formData });
-      if (!res.ok) {
-        const body = await res.json().catch(() => null);
-        throw new Error(body?.error ?? `HTTP ${res.status}`);
-      }
-      const data = (await res.json()) as {
-        files: Array<{ text: string; warnings: string[] }>;
-      };
-      const text = data.files?.[0]?.text ?? "";
-      if (!text) {
-        throw new Error("No text could be extracted from the uploaded file.");
-      }
-      setInput(text);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(false);
-      e.target.value = "";
-    }
-  };
 
   const onRun = async () => {
     if (!input.trim()) return;
@@ -587,36 +743,13 @@ function ContractRedlineTool(): React.ReactElement {
         </span>
       </p>
 
-      <div className="flex items-center gap-2">
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept=".pdf,.docx,.txt"
-          hidden
-          onChange={onFileChange}
-        />
-        <button
-          type="button"
-          onClick={onPickFile}
-          disabled={busy}
-          className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-100 disabled:opacity-50"
-        >
-          <Paperclip className="h-3.5 w-3.5" aria-hidden />
-          파일 업로드 / Upload PDF·DOCX
-        </button>
-        {filename && (
-          <span className="truncate text-[12px] text-slate-600">
-            📎 {filename}
-          </span>
-        )}
-      </div>
-
-      <textarea
+      <FileDropTextArea
         value={input}
-        onChange={(e) => setInput(e.target.value)}
-        placeholder="계약서 본문을 여기에 붙여넣거나 위에서 파일을 업로드하세요... / Paste contract text here or upload a file above..."
+        onChange={setInput}
+        placeholder="계약서 본문을 여기에 붙여넣거나 파일을 업로드하세요... / Paste contract text or upload a file..."
         rows={10}
-        className="block w-full resize-y rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-slate-400 focus:bg-white"
+        disabled={busy}
+        onError={setError}
       />
 
       <div className="flex items-center justify-end">
@@ -791,28 +924,10 @@ function DocumentDiffTool(): React.ReactElement {
   const locale = useLocale() as "ko" | "en";
   const [originalText, setOriginalText] = React.useState("");
   const [modifiedText, setModifiedText] = React.useState("");
-  const [originalFilename, setOriginalFilename] = React.useState<string | null>(null);
-  const [modifiedFilename, setModifiedFilename] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [result, setResult] = React.useState<DiffResponse | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [analyzeLegal, setAnalyzeLegal] = React.useState(true);
-
-  const onPickOriginal = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setOriginalFilename(file.name);
-    await readFileIntoState(file, setOriginalText, setError);
-    e.target.value = "";
-  };
-
-  const onPickModified = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setModifiedFilename(file.name);
-    await readFileIntoState(file, setModifiedText, setError);
-    e.target.value = "";
-  };
 
   const onCompare = async () => {
     if (!originalText.trim() || !modifiedText.trim()) return;
@@ -856,23 +971,33 @@ function DocumentDiffTool(): React.ReactElement {
 
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
         {/* Original side */}
-        <DiffInput
-          label="원본 / Original"
-          filename={originalFilename}
-          text={originalText}
-          onText={setOriginalText}
-          onClearFilename={() => setOriginalFilename(null)}
-          onPickFile={onPickOriginal}
-        />
+        <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50/40 p-3">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+            원본 / Original
+          </div>
+          <FileDropTextArea
+            value={originalText}
+            onChange={setOriginalText}
+            placeholder="원본 텍스트를 붙여넣거나 파일을 업로드 / Paste original text or upload a file"
+            rows={8}
+            disabled={busy}
+            onError={setError}
+          />
+        </div>
         {/* Modified side */}
-        <DiffInput
-          label="수정본 / Modified"
-          filename={modifiedFilename}
-          text={modifiedText}
-          onText={setModifiedText}
-          onClearFilename={() => setModifiedFilename(null)}
-          onPickFile={onPickModified}
-        />
+        <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50/40 p-3">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+            수정본 / Modified
+          </div>
+          <FileDropTextArea
+            value={modifiedText}
+            onChange={setModifiedText}
+            placeholder="수정된 텍스트를 붙여넣거나 파일을 업로드 / Paste modified text or upload a file"
+            rows={8}
+            disabled={busy}
+            onError={setError}
+          />
+        </div>
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -916,93 +1041,6 @@ function DocumentDiffTool(): React.ReactElement {
   );
 }
 
-function DiffInput({
-  label,
-  filename,
-  text,
-  onText,
-  onClearFilename,
-  onPickFile,
-}: {
-  label: string;
-  filename: string | null;
-  text: string;
-  onText: (s: string) => void;
-  onClearFilename: () => void;
-  onPickFile: (e: React.ChangeEvent<HTMLInputElement>) => void;
-}): React.ReactElement {
-  const id = React.useId();
-  return (
-    <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50/40 p-3">
-      <div className="flex items-center justify-between">
-        <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-          {label}
-        </span>
-        <label
-          htmlFor={id}
-          className="inline-flex cursor-pointer items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium text-slate-500 hover:bg-slate-200 hover:text-slate-700"
-        >
-          <Paperclip className="h-3 w-3" aria-hidden />
-          파일 / File
-        </label>
-        <input
-          id={id}
-          type="file"
-          accept=".pdf,.docx,.txt"
-          hidden
-          onChange={onPickFile}
-        />
-      </div>
-      {filename && (
-        <div className="flex items-center gap-1.5 truncate rounded bg-white px-2 py-0.5 text-[11px] text-emerald-700">
-          📎 {filename}
-          <button
-            type="button"
-            onClick={() => {
-              onClearFilename();
-              onText("");
-            }}
-            className="ml-auto text-slate-400 hover:text-rose-600"
-          >
-            <X className="h-3 w-3" aria-hidden />
-          </button>
-        </div>
-      )}
-      <textarea
-        value={text}
-        onChange={(e) => onText(e.target.value)}
-        placeholder="텍스트를 붙여넣거나 파일을 업로드 / Paste text or upload file"
-        rows={8}
-        className="block w-full resize-y rounded border border-slate-200 bg-white px-2.5 py-2 text-[13px] text-slate-900 outline-none focus:border-slate-400"
-      />
-    </div>
-  );
-}
-
-async function readFileIntoState(
-  file: File,
-  setText: (s: string) => void,
-  setError: (s: string | null) => void,
-): Promise<void> {
-  setError(null);
-  try {
-    const formData = new FormData();
-    formData.append("files", file);
-    const res = await fetch("/api/upload", { method: "POST", body: formData });
-    if (!res.ok) {
-      const body = await res.json().catch(() => null);
-      throw new Error(body?.error ?? `HTTP ${res.status}`);
-    }
-    const data = (await res.json()) as {
-      files: Array<{ text: string; warnings: string[] }>;
-    };
-    const text = data.files?.[0]?.text ?? "";
-    if (!text) throw new Error("No text could be extracted from the file.");
-    setText(text);
-  } catch (err) {
-    setError(err instanceof Error ? err.message : String(err));
-  }
-}
 
 function DiffResultView({
   result,
@@ -1434,15 +1472,16 @@ function CivilDraftTool(): React.ReactElement {
 
       {/* Case facts */}
       <Field label="사실관계 (시간순으로 구체적으로)" required>
-        <textarea
+        <FileDropTextArea
           value={caseFacts}
-          onChange={(e) => setCaseFacts(e.target.value)}
-          placeholder="예: 2024. 3. 15. 원고는 피고에게 5천만원을 변제기 2025. 3. 14.로 정하여 대여하였다. 피고는 변제기까지 단 한 차례도 변제하지 않았고…"
+          onChange={setCaseFacts}
+          placeholder="예: 2024. 3. 15. 원고는 피고에게 5천만원을 변제기 2025. 3. 14.로 정하여 대여하였다. 피고는 변제기까지 단 한 차례도 변제하지 않았고… (또는 진술서/계약서 파일을 업로드하세요)"
           rows={8}
-          className="w-full resize-y rounded-md border border-slate-300 bg-white px-3 py-2 font-mono text-sm leading-relaxed outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200"
+          disabled={loading}
+          onError={setError}
         />
         <p className="text-[11px] text-slate-500">
-          최소 50자. 날짜·금액·장소·당사자 행위를 구체적으로.
+          최소 50자. 날짜·금액·장소·당사자 행위를 구체적으로. 진술서나 계약서 파일을 업로드하면 그 내용을 그대로 사용할 수 있습니다.
         </p>
       </Field>
 
