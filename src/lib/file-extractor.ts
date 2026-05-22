@@ -40,7 +40,15 @@ function getExt(filename: string): string {
   return i >= 0 ? filename.slice(i + 1).toLowerCase() : "";
 }
 
-type FileKind = "pdf" | "docx" | "text" | "hwp" | "unsupported";
+type FileKind =
+  | "pdf"
+  | "docx"
+  | "text"
+  | "hwp"
+  | "image"
+  | "xlsx"
+  | "rtf"
+  | "unsupported";
 
 function classify(mimeType: string, ext: string): FileKind {
   const mt = mimeType.toLowerCase();
@@ -57,6 +65,28 @@ function classify(mimeType: string, ext: string): FileKind {
   }
   if (ext === "hwp" || ext === "hwpx" || mt === "application/x-hwp" || mt === "application/haansofthwp") {
     return "hwp";
+  }
+  if (
+    mt.startsWith("image/") ||
+    ext === "jpg" ||
+    ext === "jpeg" ||
+    ext === "png" ||
+    ext === "webp" ||
+    ext === "gif"
+  ) {
+    return "image";
+  }
+  if (
+    mt ===
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
+    mt === "application/vnd.ms-excel" ||
+    ext === "xlsx" ||
+    ext === "xls"
+  ) {
+    return "xlsx";
+  }
+  if (mt === "application/rtf" || mt === "text/rtf" || ext === "rtf") {
+    return "rtf";
   }
   return "unsupported";
 }
@@ -136,6 +166,101 @@ function extractText(buffer: Buffer): string {
   return text;
 }
 
+/**
+ * Excel (.xlsx / .xls) → CSV-style plain text. Each sheet is prefixed with
+ * its name. Works well for contract appendices, payment schedules, party
+ * lists, etc. that legal teams commonly receive as spreadsheets.
+ */
+async function extractXlsx(
+  buffer: Buffer,
+): Promise<{ text: string; warnings: string[] }> {
+  const warnings: string[] = [];
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- xlsx is CJS
+    const mod: any = await import("xlsx");
+    const XLSX = mod.default ?? mod;
+    const wb = XLSX.read(buffer, { type: "buffer" });
+    const parts: string[] = [];
+    for (const sheetName of wb.SheetNames) {
+      const sheet = wb.Sheets[sheetName];
+      if (!sheet) continue;
+      const csv = XLSX.utils.sheet_to_csv(sheet, { blankrows: false });
+      if (csv.trim()) {
+        parts.push(`### ${sheetName}\n${csv.trim()}`);
+      }
+    }
+    return { text: parts.join("\n\n"), warnings };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "XLSX parsing failed";
+    warnings.push(`Excel could not be parsed: ${msg}`);
+    return { text: "", warnings };
+  }
+}
+
+/**
+ * RTF (Rich Text Format) → plain text. RTF is a markup format where each
+ * paragraph is wrapped in control words. A lightweight strip is enough for
+ * legal-doc use cases (we don't need to preserve formatting — only the
+ * text content that goes to the LLM).
+ */
+function extractRtf(buffer: Buffer): { text: string; warnings: string[] } {
+  const warnings: string[] = [];
+  try {
+    const raw = buffer.toString("utf8");
+    // Strip groups like {\fonttbl ... }, control words like \par, \rtf1, etc.
+    const text = raw
+      .replace(/\\par[d]?/g, "\n") // paragraph break
+      .replace(/\\tab/g, "\t")
+      .replace(/\{\\\*[^}]*\}/g, "") // {\* ... } extension groups
+      .replace(/\{\\[a-zA-Z]+[^}]*?\}/g, "") // {\fonttbl ... } etc.
+      .replace(/\\'([0-9a-fA-F]{2})/g, (_, hex) =>
+        String.fromCharCode(parseInt(hex, 16)),
+      )
+      .replace(/\\u(-?\d+)\??/g, (_, code) =>
+        String.fromCharCode(parseInt(code, 10)),
+      )
+      .replace(/\\[a-zA-Z]+-?\d*\s?/g, "") // remaining control words
+      .replace(/[{}]/g, "")
+      .replace(/\r/g, "")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+    return { text, warnings };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "RTF parsing failed";
+    warnings.push(`RTF could not be parsed: ${msg}`);
+    return { text: "", warnings };
+  }
+}
+
+/**
+ * Image (JPG / PNG / WEBP / GIF) → OCR text via Claude vision. Same
+ * pipeline used by the scanned-PDF fallback, but called directly when the
+ * upload IS an image.
+ */
+async function extractImage(
+  buffer: Buffer,
+  mimeType: string,
+  ext: string,
+): Promise<{ text: string; warnings: string[] }> {
+  const { ocrImageWithVision } = await import("./ocr");
+  // Normalize media type — some browsers send "image/jpg" instead of
+  // "image/jpeg", and PNG/GIF/WEBP need the canonical form.
+  let mt = mimeType.toLowerCase();
+  if (!mt.startsWith("image/")) {
+    mt =
+      ext === "png"
+        ? "image/png"
+        : ext === "webp"
+          ? "image/webp"
+          : ext === "gif"
+            ? "image/gif"
+            : "image/jpeg";
+  }
+  if (mt === "image/jpg") mt = "image/jpeg";
+  const ocr = await ocrImageWithVision(buffer, mt);
+  return { text: ocr.text, warnings: ocr.warnings };
+}
+
 export async function extractFromBuffer(
   buffer: Buffer,
   filename: string,
@@ -196,9 +321,43 @@ export async function extractFromBuffer(
         warnings: [HWP_UNSUPPORTED_WARNING],
       };
     }
+    case "image": {
+      const { text, warnings } = await extractImage(buffer, mimeType, ext);
+      return {
+        filename: safeName,
+        mimeType: mimeType || `image/${ext || "jpeg"}`,
+        byteSize,
+        text,
+        warnings,
+      };
+    }
+    case "xlsx": {
+      const { text, warnings } = await extractXlsx(buffer);
+      return {
+        filename: safeName,
+        mimeType:
+          mimeType ||
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        byteSize,
+        text,
+        warnings,
+      };
+    }
+    case "rtf": {
+      const { text, warnings } = extractRtf(buffer);
+      return {
+        filename: safeName,
+        mimeType: mimeType || "application/rtf",
+        byteSize,
+        text,
+        warnings,
+      };
+    }
     case "unsupported":
     default:
-      throw new Error(`Unsupported file type: ${mimeType || ext || "unknown"}`);
+      throw new Error(
+        `Unsupported file type: ${mimeType || ext || "unknown"}. Supported: PDF, DOCX, TXT, MD, RTF, XLSX, JPG, PNG, WEBP, GIF. HWP files must be converted to PDF first. / 지원 형식: PDF, DOCX, TXT, MD, RTF, XLSX, 이미지(JPG/PNG/WEBP/GIF). HWP는 PDF로 변환 후 업로드.`,
+      );
   }
 }
 

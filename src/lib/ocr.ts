@@ -37,6 +37,67 @@ export type OcrResult = {
  * empty text + an explanatory warning on failure (never throws — failed OCR
  * should degrade gracefully to the existing "scanned PDF" warning path).
  */
+/**
+ * Run Claude vision over an image buffer (JPG / PNG / WEBP / GIF). Returns
+ * extracted text or empty + warning on failure. Never throws.
+ */
+export async function ocrImageWithVision(
+  buffer: Buffer,
+  mediaType: string,
+): Promise<OcrResult> {
+  const warnings: string[] = [];
+  // Claude images have a 5 MB ceiling (current docs) — refuse anything bigger.
+  const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+  if (buffer.byteLength > MAX_IMAGE_BYTES) {
+    warnings.push(
+      `OCR skipped: image is ${(buffer.byteLength / 1024 / 1024).toFixed(1)} MB which exceeds the 5 MB OCR ceiling.`,
+    );
+    return { text: "", warnings };
+  }
+
+  const model = resolveModelForUse(OCR_MODEL_ID) ?? OCR_MODEL_ID;
+
+  try {
+    const result = await generateText({
+      model,
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "file",
+              data: buffer,
+              mediaType,
+            },
+            {
+              type: "text",
+              text: OCR_PROMPT,
+            },
+          ],
+        },
+      ],
+      abortSignal: AbortSignal.timeout(OCR_TIMEOUT_MS),
+      maxOutputTokens: 8192,
+    });
+
+    const text = (result.text ?? "").trim();
+    if (!text) {
+      warnings.push(
+        "OCR returned empty text — the model could not read text from the image.",
+      );
+    } else {
+      warnings.push(
+        "이미지에서 OCR로 텍스트를 추출했습니다. 정확도 확인이 필요할 수 있습니다. / Text was OCR-extracted from an image — verify accuracy.",
+      );
+    }
+    return { text, warnings };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    warnings.push(`Image OCR failed: ${message}`);
+    return { text: "", warnings };
+  }
+}
+
 export async function ocrPdfWithVision(
   buffer: Buffer,
   pageCount: number | undefined,

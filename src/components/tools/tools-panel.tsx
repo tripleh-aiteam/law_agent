@@ -140,7 +140,7 @@ function FileDropTextArea({
   disabled,
   onError,
   onBusyChange,
-  accept = ".pdf,.docx,.txt,.md",
+  accept = ".pdf,.docx,.txt,.md,.rtf,.xlsx,.xls,.jpg,.jpeg,.png,.webp,.gif,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,text/markdown,application/rtf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,image/*",
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -150,6 +150,8 @@ function FileDropTextArea({
   disabled?: boolean;
   onError?: (msg: string) => void;
   onBusyChange?: (busy: boolean) => void;
+  /** Override accept attribute. Defaults to all supported document + image
+   * types: PDF, DOCX, TXT, MD, RTF, XLSX, and images (JPG/PNG/WEBP/GIF). */
   accept?: string;
 }): React.ReactElement {
   const fileInputRef = React.useRef<HTMLInputElement>(null);
@@ -258,7 +260,7 @@ function FileDropTextArea({
           ) : (
             <Paperclip className="h-3.5 w-3.5" aria-hidden />
           )}
-          파일 업로드 / Upload (PDF · DOCX · TXT)
+          파일 업로드 / Upload (PDF · DOCX · TXT · RTF · XLSX · JPG · PNG)
         </button>
         <span className="text-[11px] text-slate-500">
           또는 끌어다 놓기 · 또는 붙여넣기 / or drag &amp; drop · or paste
