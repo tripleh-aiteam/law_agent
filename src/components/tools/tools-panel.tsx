@@ -177,14 +177,27 @@ function FileDropTextArea({
         const data = (await res.json()) as {
           files: Array<{ text: string; warnings?: string[] }>;
         };
-        const text = data.files?.[0]?.text ?? "";
+        const first = data.files?.[0];
+        const text = first?.text ?? "";
+        const warnings = first?.warnings ?? [];
+
         if (!text.trim()) {
-          throw new Error(
-            "파일에서 텍스트를 추출할 수 없습니다. / No text could be extracted from the uploaded file.",
-          );
+          // Surface the actual reason — HWP unsupported, scanned PDF OCR
+          // failed, corrupted file, etc. Without this the user just sees
+          // a generic "no text" message and can't act on it.
+          const reason =
+            warnings.length > 0
+              ? warnings.join(" / ")
+              : `${file.name} — 파일 형식을 인식할 수 없거나 텍스트가 비어 있습니다. PDF·DOCX·TXT만 지원합니다. / Unrecognized file type or empty content. Only PDF, DOCX, TXT are supported. (HWP 파일은 PDF로 변환 후 업로드해주세요.)`;
+          throw new Error(reason);
         }
         onChange(text);
         setFilename(file.name);
+        // Soft warnings (e.g. OCR succeeded but quality may vary) — show
+        // as info but don't block the user.
+        if (warnings.length > 0) {
+          onError?.(`ℹ️ ${warnings.join(" / ")}`);
+        }
       } catch (err) {
         onError?.(err instanceof Error ? err.message : String(err));
       } finally {
