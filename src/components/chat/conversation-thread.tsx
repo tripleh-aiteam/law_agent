@@ -338,7 +338,10 @@ function BranchBody({
   const t = useTranslations("chat");
   const locale = useLocale() as "ko" | "en";
   const { setBestBranch, currentCaseId, currentCase } = useCases();
-  const [showDetails, setShowDetails] = React.useState(false);
+  // Default OPEN so the user sees the full Summary/Detailed/Why dashboard
+  // immediately without an extra click. Toggle button stays so they can
+  // collapse on long pages.
+  const [showDetails, setShowDetails] = React.useState(true);
   const [downloadOpen, setDownloadOpen] = React.useState(false);
   const downloadMenuRef = React.useRef<HTMLDivElement>(null);
   React.useEffect(() => {

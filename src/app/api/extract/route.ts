@@ -140,18 +140,28 @@ function friendlyExtractError(
   const tag = modelLabel ? `[${modelLabel}] ` : "";
 
   // ── Provider "no funds" / quota patterns ──────────────────────────
+  //
+  // Format convention for ALL exhausted-credit messages below:
+  //   Line 1 (Korean):  💳 "Law Agent에서 ChatGPT를 사용하시려면 OpenAI 잔액을 먼저 충전해주세요."
+  //   Line 2 (Korean):  Provider direct link
+  //   Line 3 (Korean):  "다른 모델은 계속 사용 가능합니다: …" (when applicable)
+  //   Blank line
+  //   Line 5 (English): "Your OpenAI credit has run out — please recharge first to keep using ChatGPT in Law Agent."
+  //   Line 6 (English): Provider direct link
+  //   Line 7 (English): Available-alternatives hint
+
   const isOpenAiQuota =
     family === "openai" &&
     (lower.includes("exceeded your current quota") ||
       lower.includes("insufficient_quota"));
   if (isOpenAiQuota) {
     return (
-      `${tag}❗ OpenAI 잔액이 부족합니다. 결제 페이지에서 충전 후 다시 시도해 주세요: ` +
-      `https://platform.openai.com/settings/organization/billing/overview\n` +
-      `(다른 모델은 별도 결제 — Claude / Gemini / Manus 는 계속 사용 가능합니다.)\n\n` +
-      `❗ Your OpenAI account has no remaining credit. Please recharge at ` +
-      `https://platform.openai.com/settings/organization/billing/overview and retry. ` +
-      `(Other models use separate billing — Claude / Gemini / Manus still work.)`
+      `${tag}💳 Law Agent에서 ChatGPT를 사용하시려면 OpenAI 잔액을 먼저 충전해 주세요.\n` +
+      `결제: https://platform.openai.com/settings/organization/billing/overview\n` +
+      `다른 모델은 별도 결제이므로 Claude / Gemini / Manus / 무료 모델은 계속 사용하실 수 있습니다.\n\n` +
+      `💳 Your OpenAI credit has run out — please recharge first to keep using ChatGPT in Law Agent.\n` +
+      `Billing: https://platform.openai.com/settings/organization/billing/overview\n` +
+      `Other models use separate billing — Claude / Gemini / Manus / free models still work.`
     );
   }
 
@@ -175,10 +185,12 @@ function friendlyExtractError(
       lower.includes("billing.anthropic"));
   if (isAnthropicLowBalance) {
     return (
-      `${tag}❗ Anthropic 잔액이 부족합니다. 결제 페이지에서 충전 후 다시 시도해 주세요: ` +
-      `https://console.anthropic.com/settings/billing\n\n` +
-      `❗ Your Anthropic account credit is too low. Please recharge at ` +
-      `https://console.anthropic.com/settings/billing and retry.`
+      `${tag}💳 Law Agent에서 Claude를 사용하시려면 Anthropic 잔액을 먼저 충전해 주세요.\n` +
+      `결제: https://console.anthropic.com/settings/billing\n` +
+      `다른 모델(ChatGPT / Gemini / Manus / 무료 모델)은 계속 사용 가능합니다.\n\n` +
+      `💳 Your Anthropic credit has run out — please recharge first to keep using Claude in Law Agent.\n` +
+      `Billing: https://console.anthropic.com/settings/billing\n` +
+      `Other models (ChatGPT / Gemini / Manus / free) still work.`
     );
   }
 
@@ -189,10 +201,33 @@ function friendlyExtractError(
       lower.includes("rate limit"));
   if (isGoogleQuota) {
     return (
-      `${tag}❗ Google AI Studio 무료 한도(1,500 req/day)를 초과했거나 일시적 속도 제한입니다. 몇 분 후 다시 시도하거나 결제를 설정해 주세요: ` +
-      `https://aistudio.google.com/apikey\n\n` +
-      `❗ Google AI Studio quota exceeded (free tier is 1,500 req/day) or rate-limited. ` +
-      `Wait a few minutes and retry, or set up billing at https://aistudio.google.com/apikey.`
+      `${tag}💳 Law Agent에서 Gemini를 사용하시려면 Google AI Studio 무료 한도를 다시 받거나 결제를 설정해 주세요.\n` +
+      `(무료 한도: 1,500회/일 — 몇 분 후 자동 복구되거나, 결제 설정 시 즉시 사용 가능)\n` +
+      `결제·키 관리: https://aistudio.google.com/apikey\n\n` +
+      `💳 Your Gemini free quota is exhausted (1,500 req/day). It auto-resets in a few minutes, or you can set up billing for instant uplift.\n` +
+      `Billing / keys: https://aistudio.google.com/apikey\n` +
+      `Other models (Claude / ChatGPT / Manus / free Groq models) still work in the meantime.`
+    );
+  }
+
+  // Groq free tier — Open GPT 120B and Llama 4 Scout. Both hit the same
+  // 14,400 req/day shared quota.
+  const isGroqQuota =
+    family === "groq" &&
+    (lower.includes("rate_limit_exceeded") ||
+      lower.includes("rate limit") ||
+      lower.includes("quota") ||
+      lower.includes("429"));
+  if (isGroqQuota) {
+    return (
+      `${tag}💳 Law Agent에서 무료 모델(Open GPT 120B / Llama 4 Scout)의 일일 사용량을 초과했습니다.\n` +
+      `Groq 무료 한도: 14,400회/일 — UTC 자정에 자동 초기화됩니다.\n` +
+      `즉시 사용하시려면 Claude / Gemini / ChatGPT 중 하나를 선택해 주세요.\n` +
+      `Groq 결제: https://console.groq.com/settings/billing\n\n` +
+      `💳 You've exhausted today's free quota on Groq (Open GPT 120B / Llama 4 Scout).\n` +
+      `Free limit is 14,400 req/day — auto-resets at UTC midnight.\n` +
+      `For immediate use, pick Claude / Gemini / ChatGPT instead.\n` +
+      `Groq billing: https://console.groq.com/settings/billing`
     );
   }
 
@@ -203,10 +238,12 @@ function friendlyExtractError(
       lower.includes("not enough credit"));
   if (isManusCredit) {
     return (
-      `${tag}❗ Manus 크레딧이 부족합니다. 충전 후 다시 시도해 주세요: ` +
-      `https://manus.im/settings/billing\n\n` +
-      `❗ Your Manus account is out of credits. Please recharge at ` +
-      `https://manus.im/settings/billing and retry.`
+      `${tag}💳 Law Agent에서 Manus 에이전트를 사용하시려면 Manus 크레딧을 먼저 충전해 주세요.\n` +
+      `결제: https://manus.im/settings/billing\n` +
+      `다른 모델(Claude / ChatGPT / Gemini / 무료 모델)은 계속 사용 가능합니다.\n\n` +
+      `💳 Your Manus credits have run out — please recharge first to keep using the Manus agent in Law Agent.\n` +
+      `Billing: https://manus.im/settings/billing\n` +
+      `Other models (Claude / ChatGPT / Gemini / free) still work.`
     );
   }
 
@@ -217,11 +254,14 @@ function friendlyExtractError(
     lower.includes("insufficient_funds")
   ) {
     return envVar
-      ? `${tag}❗ Vercel AI Gateway 잔액이 부족합니다. 직접 라우팅을 위해 Vercel 프로젝트 환경 변수에 ${envVar}를 설정하거나, ` +
-        `vercel.com → AI Gateway → Top up 에서 충전해 주세요.\n\n` +
-        `❗ The Vercel AI Gateway is out of credit. Either (1) add ${envVar} to your Vercel project environment variables to route this model directly, OR (2) top up the gateway at vercel.com → AI Gateway → Top up.`
-      : `${tag}❗ Vercel AI Gateway 잔액이 부족합니다. 충전 후 다시 시도하거나 다른 모델을 선택해 주세요.\n\n` +
-        `❗ The Vercel AI Gateway is out of credit. Top up, or pick a different model.`;
+      ? `${tag}💳 Law Agent의 AI 게이트웨이 잔액이 부족합니다.\n` +
+        `해결 방법 (둘 중 하나):\n` +
+        `  1) Vercel 프로젝트 환경 변수에 ${envVar}를 추가하여 직접 라우팅 — 즉시 사용 가능\n` +
+        `  2) Vercel → AI Gateway → Top up 에서 충전\n\n` +
+        `💳 Law Agent's AI Gateway is out of credit.\n` +
+        `Either: (1) add ${envVar} to your Vercel env vars to route this model directly, OR (2) top up at vercel.com → AI Gateway → Top up.`
+      : `${tag}💳 Law Agent의 AI 게이트웨이 잔액이 부족합니다. 결제 페이지에서 충전하시거나 다른 모델을 선택해 주세요.\n\n` +
+        `💳 Law Agent's AI Gateway is out of credit. Top up, or pick a different model.`;
   }
 
   // ── Recoverable LLM output issues ─────────────────────────────────
