@@ -591,10 +591,17 @@ export function ChatInput() {
   };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-      e.preventDefault();
-      if (canSend) onSend();
-    }
+    // Standard chat UX: bare Enter sends, Shift+Enter inserts a newline.
+    // We also keep accepting Cmd/Ctrl+Enter so muscle memory from the
+    // previous binding still works. nativeEvent.isComposing prevents an
+    // accidental send while a Korean IME is mid-composition (the IME
+    // fires its own Enter to commit the candidate — we must NOT treat
+    // that as a submit).
+    if (e.key !== "Enter") return;
+    if (e.nativeEvent.isComposing) return;
+    if (e.shiftKey) return;
+    e.preventDefault();
+    if (canSend) onSend();
   };
 
   /**
