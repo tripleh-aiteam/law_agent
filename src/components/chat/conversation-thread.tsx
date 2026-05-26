@@ -6,7 +6,6 @@ import {
   AlertTriangle,
   CheckCircle2,
   ChevronDown,
-  ChevronUp,
   Download,
   Loader2,
   Paperclip,
@@ -338,10 +337,6 @@ function BranchBody({
   const t = useTranslations("chat");
   const locale = useLocale() as "ko" | "en";
   const { setBestBranch, currentCaseId, currentCase } = useCases();
-  // Default OPEN so the user sees the full Summary/Detailed/Why dashboard
-  // immediately without an extra click. Toggle button stays so they can
-  // collapse on long pages.
-  const [showDetails, setShowDetails] = React.useState(true);
   const [downloadOpen, setDownloadOpen] = React.useState(false);
   const downloadMenuRef = React.useRef<HTMLDivElement>(null);
   React.useEffect(() => {
@@ -538,36 +533,19 @@ function BranchBody({
         )
       )}
 
-      {/* Expandable full details */}
+      {/* Detailed analysis — always visible. The Hide/View toggle and
+          Summary/Why tabs were removed at the user's request: the team
+          wants the full long-form detailed analysis to be the default
+          response shape. Summary / counter-args are still reachable via
+          the action chips below the chat input. */}
       {branch.elements && turn.narrative && (
-        <div>
-          <button
-            type="button"
-            onClick={() => setShowDetails((v) => !v)}
-            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[12px] font-medium text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700"
-          >
-            {showDetails ? (
-              <>
-                <ChevronUp className="h-3.5 w-3.5" aria-hidden />
-                {t("hideDetails")}
-              </>
-            ) : (
-              <>
-                <ChevronDown className="h-3.5 w-3.5" aria-hidden />
-                {t("viewDetails")}
-              </>
-            )}
-          </button>
-          {showDetails && (
-            <div className="mt-2 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-              <CaseDashboard
-                caseFileId={`${turn.id}:${branch.modelId}:${locale}`}
-                narrative={turn.narrative}
-                elements={branch.elements}
-                matches={matches}
-              />
-            </div>
-          )}
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+          <CaseDashboard
+            caseFileId={`${turn.id}:${branch.modelId}:${locale}`}
+            narrative={turn.narrative}
+            elements={branch.elements}
+            matches={matches}
+          />
         </div>
       )}
     </div>
