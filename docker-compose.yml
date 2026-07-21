@@ -1,0 +1,83 @@
+# Law Agent — on-prem stack
+#
+# Local (developer machine):
+#   docker compose up -d --build
+#   docker compose exec app npx tsx scripts/migrate-corpus-to-db.ts
+#   open http://localhost:3000
+#
+# Firm server (adds TLS via Caddy):
+#   docker compose --profile proxy up -d --build
+#
+# The `proxy` profile means the same file serves both environments without
+# divergence — Caddy simply isn't started unless the profile is requested.
+
+services:
+  db:
+    # pgvector/pgvector ships Postgres with the vector extension already
+    # compiled in; the stock postgres image does not.
+    image: pgvector/pgvector:pg17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-lawagent}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-lawagent}
+      # Korean text: use a collation that sorts sensibly.
+      LANG: C.UTF-8
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # Executed once, only when pgdata is empty.
+      - ./db/init.sql:/docker-entrypoint-initdb.d/001-init.sql:ro
+    # NOT published to the host on the server — the app reaches it over the
+    # compose network. Uncomment for local inspection with psql/TablePlus.
+    # ports:
+    #   - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-lawagent} -d ${POSTGRES_DB:-lawagent}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-lawagent}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-lawagent}
+      NODE_ENV: production
+      # LLM provider keys — set these in .env (never commit them).
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GOOGLE_GENERATIVE_AI_API_KEY: ${GOOGLE_GENERATIVE_AI_API_KEY:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      MANUS_API_KEY: ${MANUS_API_KEY:-}
+      # law.go.kr citation verification. Works from a Korean IP; this is the
+      # whole reason the app is leaving Vercel's US egress.
+      LAW_GO_KR_API_KEY: ${LAW_GO_KR_API_KEY:-}
+    ports:
+      # On the server, prefer binding to localhost only and letting Caddy
+      # terminate TLS:  "127.0.0.1:3000:3000"
+      - "${APP_PORT:-3000}:3000"
+
+  caddy:
+    image: caddy:2-alpine
+    profiles: ["proxy"]
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+      - caddyconfig:/config
+
+volumes:
+  pgdata:
+  caddydata:
+  caddyconfig:

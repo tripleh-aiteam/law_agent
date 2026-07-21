@@ -2,6 +2,92 @@
 
 ---
 
+## 2026-07-20 (Monday) — Ask pipeline was fully broken: retired Groq model + 4 expired keys
+
+### Goal
+
+User reported "asking is not working" — every question failed. Root-caused it (two independent failures stacked on top of each other), fixed the code half, and identified the credential half that only the user can fix.
+
+### Root cause
+
+Two separate problems, both fatal on their own:
+
+1. **All paid credentials are expired.** Probed each provider directly:
+
+   | Credential | Status |
+   |---|---|
+   | `GROQ_API_KEY` | ✅ valid |
+   | `ANTHROPIC_API_KEY` | ❌ invalid |
+   | `OPENAI_API_KEY` | ❌ invalid |
+   | `GOOGLE_GENERATIVE_AI_API_KEY` | ❌ invalid |
+   | `AI_GATEWAY_API_KEY` | ❌ invalid |
+
+   `DEFAULT_MODEL_ID` was `anthropic/claude-sonnet-4.6`, so the *default* first question every user asked hit a dead key. That was the visible symptom.
+
+2. **Groq retired `meta-llama/llama-4-scout-17b-16e-instruct`.** It was pinned as `EXTRACTION_MODEL` and returned `"does not exist or you do not have access to it"` on every call. This silently broke `/api/case/{detailed,summarize,why}`, `/api/document/diff`, contract redline, court drafts, lawgo-normalizer and PII redaction — i.e. it took out the *one* provider whose key still worked.
+
+### Files updated
+
+- [`src/lib/ai.ts`](src/lib/ai.ts) — `EXTRACTION_MODEL` → `openai/gpt-oss-120b` (verified present on the account + reliable on our nested zod schema). `EXTRACTION_MODEL_FALLBACK` → `openai/gpt-oss-20b`. Added a note to re-check `GET https://api.groq.com/openai/v1/models` before pinning any future default, since Groq rotates its roster.
+- [`src/lib/models.ts`](src/lib/models.ts) — removed the retired Llama 4 Scout registry entry, added `groq/openai/gpt-oss-20b`. Tested `qwen/qwen3.6-27b` and `llama-3.3-70b-versatile` as candidates: **both reject `response_format: json_schema`**, which every `generateObject` call depends on — so the gpt-oss family is the only viable free option here.
+- [`src/lib/models.ts`](src/lib/models.ts) — added legacy aliases mapping Scout/Maverick/Kimi/Qwen/Llama-3.x → `gpt-oss-120b`. Without these, a saved selection containing Scout gets silently dropped by `safeModelIds`, leaving **zero** models selected and the Send button permanently disabled.
+- [`src/lib/models.ts`](src/lib/models.ts) — `DEFAULT_MODEL_ID` → `groq/openai/gpt-oss-120b` so the app works out of the box. Marked ⚠️ TEMPORARY in a comment; flip back to Sonnet 4.6 once the Anthropic key is restored.
+- [`src/app/api/extract/route.ts`](src/app/api/extract/route.ts) — `friendlyExtractError` handled every "out of credit" case but had **no branch for an invalid/expired key**, so users saw raw provider strings (`"API key is invalid."`) with no idea which key or where to fix it. Added a bilingual invalid-key branch matching the shared vocabulary across providers, plus `providerDisplayName()` / `providerKeyConsoleUrl()` helpers and a `groq` case in `directKeyEnvVar()`. Also corrected stale "Llama 4 Scout" copy in the Groq quota message.
+
+### Verification
+
+- `npx tsc --noEmit` clean.
+- `/api/extract` with no model (new default) → HTTP 200 with populated elements.
+- `/api/case/detailed` → HTTP 200, correctly reasoned 계약갱신요구권 / 실거주 거절 / 임차권 승계 analysis (was 404-broken before).
+- `/api/extract` with Claude → now returns the actionable bilingual key-replacement message instead of raw gibberish.
+- `.env.local` confirmed gitignored and never committed — no secret leak.
+
+### What this unblocks
+
+The app answers questions again on the free Groq path, and every dashboard route that depended on `EXTRACTION_MODEL` works. Expired keys now produce a message that tells the user exactly which key to replace and where.
+
+### Next
+
+- **User action required — rotate 4 keys:** Anthropic (`console.anthropic.com/settings/keys`), OpenAI (`platform.openai.com/api-keys`), Google AI Studio (`aistudio.google.com/apikey`), Vercel AI Gateway. Update `.env.local` **and** Vercel project env vars.
+- **`/api/search` is still down** and cannot be fixed in code: embeddings route through the AI Gateway ([`src/lib/local-embed.ts`](src/lib/local-embed.ts)) and Groq serves no embedding model. Degrades gracefully — [`src/components/chat/chat-input.tsx`](src/components/chat/chat-input.tsx) swallows search errors so the analysis still renders, just without 판례 matches.
+- **Quality caveat:** gpt-oss-120b is korean:3 vs Sonnet's korean:5. Observed it inventing a "5년 계약 조기 해지" issue from a 2-year renewal-refusal fact pattern. Restore Claude before any real legal work.
+- **Unrelated bug spotted, not investigated:** Manus returned empty `elements` *and* a summary about 전세사기 that appeared nowhere in the prompt — looks like stale/leaked session content.
+- `RERANK_MODEL` is still `openai/gpt-4o` routed via the dead gateway ([`src/lib/ai.ts`](src/lib/ai.ts)) — moot while search is down, but it needs a decision when the gateway key returns.
+
+---
+
+## 2026-05-26 (Tuesday) — Detailed-only response shape (no tabs, no toggle)
+
+### Goal
+
+Boss wants every answer to land as a long-form detailed analysis by default — no Summary / Why? tabs gating the content, no "View details" click required. Summary and counter-arguments are still reachable via action chips when explicitly asked for, but they're no longer the default response.
+
+### What shipped
+
+**1. Dashboard reduced to Detailed-only**
+- Removed the 3-tab strip (Summary · Detailed · Why?) entirely.
+- `/api/case/detailed` now fires automatically when the dashboard mounts (used to lazy-fire only when the Detailed tab was opened).
+- Auto-fetch on locale change preserved via the existing cache-key effect; summary/why caches deleted.
+- [`src/components/dashboard/case-dashboard.tsx`](src/components/dashboard/case-dashboard.tsx) rewritten — `Tabs`/`TabsContent` imports gone, `SummaryView` + `WhyView` imports gone, `summaryCache` gone. Body shrunk from ~270 lines to ~110.
+
+**2. Hide / View Details toggle removed**
+- The collapsible details panel on each branch's answer card is now always-on.
+- `showDetails` state + `ChevronUp`/`ChevronDown` import gone from the branch view.
+- [`src/components/chat/conversation-thread.tsx`](src/components/chat/conversation-thread.tsx) — toggle button JSX replaced with an unconditional `<CaseDashboard … />` block inside the same shadow-sm panel.
+
+### What this unblocks
+
+- Every new turn now lands with the full 사건 개요 / 핵심 쟁점 / 적용 법령 / 판례 적용 / 당사자별 논거 / 전략적 고려사항 / 권고사항 view visible — no clicks. Matches what the boss wanted to see.
+- The action chips (사례 요약 / 상세 분석 / 인용 가능 판례 / 반대 측 예상 논거 / 적용 법령) keep working because they fire fresh turns; they just no longer share a tab strip with the main answer.
+
+### Next
+
+- `summary-view.tsx` and `why-view.tsx` are now unreferenced from `case-dashboard.tsx`. Still imported elsewhere? Worth a sweep — if unused everywhere we can delete the files (~600 lines saved).
+- Translation keys `dashboard.tabs.{summary,detailed,why}` are now orphan in `messages/{ko,en}.json` — same cleanup opportunity.
+- Production deploy: `https://law-agent-rolqh3191-triplehs-projects-de5883b3.vercel.app` (alias: `law-agent-jet.vercel.app`).
+
+---
+
 ## 2026-05-19 (Tuesday) — Track A: production deploy + real 대법원 corpus (409 cases)
 
 ### Goal

@@ -1,63 +1,22 @@
-import { promises as fs } from "node:fs";
-import path from "node:path";
-import { PrecedentSchema, type Precedent, type LegalElements } from "./types";
-import { cosineSimilarity } from "./ai";
+/**
+ * Precedent retrieval.
+ *
+ * Similarity search now runs in Postgres via pgvector rather than by parsing
+ * a 47MB JSON corpus into memory on every cold start. `loadCorpus` and
+ * `loadCorpusEmbeddings` are gone; `searchPrecedents` replaces them and the
+ * old in-memory `semanticSearch` together.
+ *
+ * The seed JSON under src/data/ is retained as the migration source only —
+ * see scripts/migrate-corpus-to-db.ts. Nothing at request time reads it.
+ */
+import type { LegalElements } from "./types";
 import { embedTextLocal } from "./local-embed";
-
-const CORPUS_PATH = path.join(process.cwd(), "src", "data", "corpus.json");
-const EMBEDDINGS_PATH = path.join(process.cwd(), "src", "data", "corpus-embeddings.json");
-
-/** Reads src/data/corpus.json. Returns [] if the file does not yet exist. */
-export async function loadCorpus(): Promise<Precedent[]> {
-  try {
-    const raw = await fs.readFile(CORPUS_PATH, "utf-8");
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    // Be lenient: validate each item, drop the ones that don't match.
-    const out: Precedent[] = [];
-    for (const item of parsed) {
-      const r = PrecedentSchema.safeParse(item);
-      if (r.success) out.push(r.data);
-    }
-    return out;
-  } catch (err: unknown) {
-    // ENOENT or malformed JSON — return empty corpus so the pipeline degrades gracefully.
-    if ((err as NodeJS.ErrnoException)?.code === "ENOENT") return [];
-    return [];
-  }
-}
-
-/** Reads src/data/corpus-embeddings.json keyed by caseNumber. Returns an empty Map if missing. */
-export async function loadCorpusEmbeddings(): Promise<Map<string, number[]>> {
-  const out = new Map<string, number[]>();
-  try {
-    const raw = await fs.readFile(EMBEDDINGS_PATH, "utf-8");
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return out;
-    for (const item of parsed) {
-      if (
-        item &&
-        typeof item === "object" &&
-        "caseNumber" in item &&
-        "embedding" in item &&
-        typeof (item as { caseNumber: unknown }).caseNumber === "string" &&
-        Array.isArray((item as { embedding: unknown }).embedding)
-      ) {
-        const cn = (item as { caseNumber: string }).caseNumber;
-        const emb = (item as { embedding: number[] }).embedding;
-        out.set(cn, emb);
-      }
-    }
-    return out;
-  } catch (err: unknown) {
-    if ((err as NodeJS.ErrnoException)?.code === "ENOENT") return out;
-    return out;
-  }
-}
+import { searchPrecedentsByEmbedding, countPrecedents } from "./db";
+import type { Precedent } from "./types";
 
 /** Embeds the query text using the local multilingual-e5-base pipeline. */
 export async function embedQuery(text: string): Promise<number[]> {
-  // role="query" — e5 family uses different prefixes for queries vs passages.
+  // role="query" — e5 requires different prefixes for queries vs passages.
   return embedTextLocal(text, "query");
 }
 
@@ -88,23 +47,27 @@ export function buildQueryText(elements: LegalElements, narrative: string): stri
 }
 
 /**
- * Cosine similarity search over the corpus. Returns top-K precedents with
- * their embedding score, sorted descending. Precedents missing an embedding
- * are silently skipped (they can still be added in a later embed run).
+ * Top-K precedents most similar to the query embedding, ranked by pgvector
+ * cosine distance. Scores are similarity (higher is better), matching the
+ * convention the reranker expects.
  */
-export function semanticSearch(
+export async function searchPrecedents(
   queryEmbedding: number[],
-  corpus: Precedent[],
-  embeddings: Map<string, number[]>,
-  topK = 10
-): Array<{ precedent: Precedent; embedding: number }> {
-  const scored: Array<{ precedent: Precedent; embedding: number }> = [];
-  for (const p of corpus) {
-    const emb = embeddings.get(p.caseNumber);
-    if (!emb) continue;
-    const score = cosineSimilarity(queryEmbedding, emb);
-    scored.push({ precedent: p, embedding: score });
+  topK = 10,
+): Promise<Array<{ precedent: Precedent; embedding: number }>> {
+  return searchPrecedentsByEmbedding(queryEmbedding, topK);
+}
+
+/**
+ * Whether the corpus is loaded and usable. The search route calls this to
+ * return an empty result set (rather than a 500) when the database has been
+ * provisioned but the corpus migration hasn't been run yet.
+ */
+export async function isCorpusReady(): Promise<boolean> {
+  try {
+    const { embedded } = await countPrecedents();
+    return embedded > 0;
+  } catch {
+    return false;
   }
-  scored.sort((a, b) => b.embedding - a.embedding);
-  return scored.slice(0, topK);
 }

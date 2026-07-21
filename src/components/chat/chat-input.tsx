@@ -188,8 +188,16 @@ export function ChatInput() {
 
   /** Single AbortController governs ALL parallel branches for the current
    * turn. Click Stop → abort → every per-model fetch rejects with AbortError
-   * → each branch marks itself cancelled. */
-  const abortRef = React.useRef<AbortController | null>(null);
+   * → each branch marks itself cancelled.
+   *
+   * We track WHICH case the in-flight pipeline belongs to alongside the
+   * controller. The case-switch effect below needs that to tell a genuine
+   * "user navigated to another case" (abort) apart from "onSend just
+   * created the case this very request belongs to" (do NOT abort). */
+  const abortRef = React.useRef<{
+    controller: AbortController;
+    caseId: string;
+  } | null>(null);
 
   const [speechSupported, setSpeechSupported] = React.useState(false);
   React.useEffect(() => {
@@ -199,10 +207,24 @@ export function ChatInput() {
   }, []);
 
   // On case switch: clear textarea + attachments + abort any in-flight pipeline.
+  //
+  // CAREFUL — this effect used to abort the FIRST question of every fresh
+  // session. Asking with no case selected makes onSend call
+  // createCase() + selectCase(), so currentCaseId changes inside the same
+  // React batch as the send. This effect then fired and aborted the
+  // AbortController onSend had just assigned, and the turn rendered as
+  // "사용자가 정지함" even though the user never touched Stop. (The second
+  // question always worked, because by then the case id no longer changed
+  // — which is what made it look intermittent.)
+  //
+  // The guard below distinguishes the two cases: if the in-flight pipeline
+  // already belongs to the case we just switched to, this isn't a
+  // navigation away — it's the send that created it. Leave it alone.
   React.useEffect(() => {
+    if (abortRef.current && abortRef.current.caseId === currentCaseId) return;
     setValue("");
     setAttachments([]);
-    abortRef.current?.abort();
+    abortRef.current?.controller.abort();
     abortRef.current = null;
     setIsSending(false);
   }, [currentCaseId]);
@@ -482,7 +504,7 @@ export function ChatInput() {
     (value.trim().length >= minChars || hasReadyAttachments);
 
   const onStop = () => {
-    abortRef.current?.abort();
+    abortRef.current?.controller.abort();
   };
 
   /**
@@ -542,7 +564,9 @@ export function ChatInput() {
     setError(null);
 
     const ac = new AbortController();
-    abortRef.current = ac;
+    // Record the owning case id so the case-switch effect can tell this
+    // send apart from a real navigation (see the effect above).
+    abortRef.current = { controller: ac, caseId: targetId };
     setIsSending(true);
 
     // Fan out — Promise.allSettled so one model's failure doesn't kill
@@ -585,7 +609,7 @@ export function ChatInput() {
         }),
       );
     } finally {
-      if (abortRef.current === ac) abortRef.current = null;
+      if (abortRef.current?.controller === ac) abortRef.current = null;
       setIsSending(false);
     }
   };

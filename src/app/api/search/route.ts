@@ -2,11 +2,10 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { LegalElementsSchema } from "@/lib/types";
 import {
-  loadCorpus,
-  loadCorpusEmbeddings,
   embedQuery,
   buildQueryText,
-  semanticSearch,
+  searchPrecedents,
+  isCorpusReady,
 } from "@/lib/retrieval";
 import { llmReranker } from "@/lib/rerank";
 import { verifyCitation } from "@/lib/verifier";
@@ -41,15 +40,15 @@ export async function POST(req: Request): Promise<Response> {
   const { narrative, elements, locale, model } = parsed.data;
 
   try {
-    const [corpus, embeddings] = await Promise.all([loadCorpus(), loadCorpusEmbeddings()]);
-    if (corpus.length === 0 || embeddings.size === 0) {
-      // Corpus or embeddings not yet built — return empty matches rather than 500.
+    // Corpus not migrated yet (fresh database) — return empty matches rather
+    // than a 500, so the extraction/analysis still renders for the user.
+    if (!(await isCorpusReady())) {
       return NextResponse.json({ matches: [] });
     }
 
     const queryText = buildQueryText(elements, narrative);
     const queryEmbedding = await embedQuery(queryText);
-    const top10 = semanticSearch(queryEmbedding, corpus, embeddings, 10);
+    const top10 = await searchPrecedents(queryEmbedding, 10);
     if (top10.length === 0) {
       return NextResponse.json({ matches: [] });
     }

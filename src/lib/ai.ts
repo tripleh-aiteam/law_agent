@@ -18,31 +18,44 @@ import { groq } from "@ai-sdk/groq";
 /**
  * Primary model for fact extraction, dashboard tabs, rerank, and citability.
  *
- * Picked `qwen/qwen3-32b` because:
- *   - Hosted on Groq (free tier, very fast — ~600 tok/s)
- *   - Supports `response_format: json_schema` reliably
- *   - Excellent Korean / East-Asian language handling
- *     (Qwen is trained heavily on Korean + Chinese + Japanese corpora)
- *   - Follows complex nested zod schemas reliably (gpt-oss-120b returned
- *     empty objects on our schema; qwen3-32b doesn't)
+ * Picked `openai/gpt-oss-120b` because:
+ *   - Hosted on Groq (free tier, very fast) and CONFIRMED present on this
+ *     account's model list — see the note on decommissioning below.
+ *   - Supports `response_format: json_schema` reliably; verified against
+ *     our nested zod extraction schema via /api/extract.
+ *   - Most capable free option Groq currently serves.
+ *
+ * NOTE: this used to be `meta-llama/llama-4-scout-17b-16e-instruct`, which
+ * Groq has since retired — every call 404'd with "does not exist or you do
+ * not have access to it", silently breaking extract, the dashboard tabs,
+ * redline, court drafts and PII redaction. Groq rotates its hosted roster,
+ * so verify against `GET https://api.groq.com/openai/v1/models` before
+ * pinning a new default here.
  *
  * NOTE: Most Llama models on Groq (incl. llama-3.3-70b-versatile) do NOT
  * support structured outputs and will fail every generateObject call.
  * See https://console.groq.com/docs/structured-outputs#supported-models
  */
-export const EXTRACTION_MODEL = groq("meta-llama/llama-4-scout-17b-16e-instruct");
+export const EXTRACTION_MODEL = groq("openai/gpt-oss-120b");
 
-/** Larger alternative, also supports structured outputs. */
-export const EXTRACTION_MODEL_FALLBACK = groq("openai/gpt-oss-120b");
+/** Smaller sibling, also supports structured outputs. */
+export const EXTRACTION_MODEL_FALLBACK = groq("openai/gpt-oss-20b");
 
 /**
- * Citability rerank model. Uses GPT-4o via Vercel AI Gateway because
- * Korean legal nuance matters more here than raw speed — the rerank decides
- * whether a precedent is "강한 권위 / 참고 / 부적합" and weak language models
- * trend overly conservative on Korean legal text. GPT-4o handles 인용 nuance
- * meaningfully better than Llama 4 Scout.
+ * Citability rerank model — the default used when the caller doesn't pass an
+ * explicit model.
+ *
+ * This was previously the bare string "openai/gpt-4o", which the AI SDK
+ * routed through the Vercel AI Gateway. On-prem there is no gateway, so a
+ * bare string would fail with an authentication error. It now points at the
+ * same local-key-backed model as extraction.
+ *
+ * Korean legal nuance genuinely matters here (the rerank decides
+ * 강한 권위 / 참고 / 부적합), so pass an explicit premium model via the
+ * `modelId` argument to llmReranker when one is configured — that path is
+ * unchanged and takes precedence over this default.
  */
-export const RERANK_MODEL = "openai/gpt-4o" as const;
+export const RERANK_MODEL = EXTRACTION_MODEL;
 
 /** Embedding dimensions — re-exported from local-embed for convenience. */
 export { EMBEDDING_DIMS } from "./local-embed";

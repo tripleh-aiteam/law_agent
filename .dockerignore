@@ -1,0 +1,27 @@
+node_modules
+.next
+.git
+.github
+.vercel
+.claude
+.claude-flow
+.swarm
+npm-debug.log*
+*.log
+.env
+.env.local
+.env*.local
+.DS_Store
+*.tsbuildinfo
+ruvector.db
+agentdb.rvf
+agentdb.rvf.lock
+Daily_changes.md
+docs
+messages/*.bak
+
+# The 47MB embeddings JSON is obsolete on-prem: those vectors are 1536-dim
+# (Vercel AI Gateway) and the local model is 768-dim, so they cannot be
+# reused. The migration script re-embeds from corpus.json instead. Excluding
+# it keeps the build context — and the image — dramatically smaller.
+src/data/corpus-embeddings.json

@@ -1,15 +1,14 @@
 /**
  * Resolves a user-selected model ID into a direct-provider model instance.
  *
- * The 7-model registry only contains Anthropic, OpenAI, and Google entries
- * (the providers the user has direct billing credit on). We always route
- * direct — the Vercel AI Gateway is intentionally NOT used as a fallback,
- * because its prepaid balance is currently empty and would just produce
- * "insufficient funds" errors that look like product bugs.
+ * Self-hosted on-prem: EVERY model routes directly to its provider using the
+ * firm's own API keys. There is no Vercel AI Gateway in this deployment —
+ * the gateway path was removed along with the Vercel hosting, because a
+ * missing provider key would otherwise surface as a misleading "AI Gateway
+ * authentication failed" error instead of "you haven't set OPENAI_API_KEY".
  *
- * If a future model is added in a family we don't have a direct SDK for,
- * this function will return the gateway-form id as a last resort. The
- * caller will then see a clear API error if the gateway is unfunded.
+ * Embeddings do NOT come through here — those are local and on-CPU. See
+ * local-embed.ts.
  */
 import { anthropic } from "@ai-sdk/anthropic";
 import { openai } from "@ai-sdk/openai";
@@ -70,8 +69,29 @@ export function resolveModelForUse(
     return groq(modelName);
   }
 
-  // No direct key set — last resort is the gateway. Will fail with a
-  // clear 402 if the gateway is unfunded; the user sees that in the
-  // turn's error message.
-  return opt.id;
+  // No direct key set for this family. Self-hosted on-prem there is no
+  // Vercel AI Gateway to fall back to, so returning the bare gateway-form
+  // id would produce a confusing "AI Gateway authentication failed" error
+  // for what is really a missing-key configuration problem. Fail with a
+  // message that names the exact env var instead.
+  throw new Error(
+    `No API key configured for ${opt.family}. Set ${envVarForFamily(opt.family)} ` +
+      `in your .env file to use ${opt.displayName}.`,
+  );
+}
+
+/** Env var that enables a given model family. */
+function envVarForFamily(family: ModelOption["family"]): string {
+  switch (family) {
+    case "anthropic":
+      return "ANTHROPIC_API_KEY";
+    case "openai":
+      return "OPENAI_API_KEY";
+    case "google":
+      return "GOOGLE_GENERATIVE_AI_API_KEY";
+    case "groq":
+      return "GROQ_API_KEY";
+    case "manus":
+      return "MANUS_API_KEY";
+  }
 }

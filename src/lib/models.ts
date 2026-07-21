@@ -102,10 +102,16 @@ export const MODEL_OPTIONS: ModelOption[] = [
   },
 
   // ─── Free LLMs (via Groq — open-weight flagships, no per-query cost) ─
-  // Groq's free tier hosts powerful open-weight models at ~500 tok/s. All
-  // three picks below support strict json_schema (verified in production).
-  // Routed via direct GROQ_API_KEY, NOT the Vercel AI Gateway, so they
-  // don't draw from any paid credit pool.
+  // Groq's free tier hosts open-weight models at ~500 tok/s, routed via
+  // direct GROQ_API_KEY (NOT the Vercel AI Gateway) so they don't draw
+  // from any paid credit pool.
+  //
+  // Only gpt-oss-* survives here: every generateObject call needs strict
+  // `response_format: json_schema`, and on this account Groq serves that
+  // for the gpt-oss family ONLY. Verified directly against the Groq API —
+  // qwen3.6-27b and llama-3.3-70b-versatile both reject json_schema, and
+  // llama-4-scout has been retired from Groq's roster entirely. Re-check
+  // `GET https://api.groq.com/openai/v1/models` before adding entries.
   {
     id: "groq/openai/gpt-oss-120b",
     displayName: "Open GPT 120B",
@@ -116,20 +122,34 @@ export const MODEL_OPTIONS: ModelOption[] = [
     korean: 3,
   },
   {
-    id: "groq/meta-llama/llama-4-scout-17b-16e-instruct",
-    displayName: "Llama 4 Scout",
+    id: "groq/openai/gpt-oss-20b",
+    displayName: "Open GPT 20B",
     family: "groq",
-    tier: "premium",
+    tier: "fast",
     description:
-      "FREE — Meta's Llama 4 Scout (17B-active, 16-expert MoE) via Groq. Strong general reasoning, supports strict json_schema. No per-query cost.",
-    korean: 3,
+      "FREE — the smaller open-weight sibling. Much faster but noticeably weaker on Korean legal nuance, and occasionally fails strict JSON on our deeper schemas. Use when speed matters more than depth.",
+    korean: 2,
+    experimental: true,
   },
 ];
 
-/** Default model when none selected — best price/quality. */
-export const DEFAULT_MODEL_ID = "anthropic/claude-sonnet-4.6";
+/**
+ * Default model when none selected.
+ *
+ * ⚠️ TEMPORARY — this SHOULD be "anthropic/claude-sonnet-4.6" (best Korean
+ * legal quality by a wide margin). It's pinned to the free Groq model only
+ * because the Anthropic / OpenAI / Google / AI-Gateway keys are all expired,
+ * which made the app fail on the very first question a new user asked.
+ *
+ * 👉 Flip this back to "anthropic/claude-sonnet-4.6" as soon as a valid
+ *    ANTHROPIC_API_KEY is in .env.local + the Vercel project env vars.
+ *    Open GPT 120B is rated korean:3 vs Sonnet's korean:5 and has been
+ *    observed misreading Korean fact patterns (e.g. inventing a "5년 계약
+ *    조기 해지" issue from a 2-year lease renewal-refusal case).
+ */
+export const DEFAULT_MODEL_ID = "groq/openai/gpt-oss-120b";
 
-/** Default multi-selection — Sonnet only on first load. */
+/** Default multi-selection — the default model only, on first load. */
 export const DEFAULT_SELECTED_MODEL_IDS: readonly string[] = [DEFAULT_MODEL_ID];
 
 const MODEL_BY_ID = new Map(MODEL_OPTIONS.map((m) => [m.id, m]));
@@ -168,15 +188,20 @@ const LEGACY_ID_ALIASES: Record<string, string> = {
   "google/gemini-3.1-flash-lite": "google/gemini-3.1-pro-preview",
   // Mixture-of-Agents was removed entirely — fall back to Claude Sonnet
   "auto/mixture-of-agents": "anthropic/claude-sonnet-4.6",
-  // Groq legacy aliases — current free roster is gpt-oss-120b + llama-4-scout.
-  // Anything older or not in the user's account migrates to gpt-oss-120b
-  // (the most powerful free option).
-  "groq/openai/gpt-oss-20b": "groq/openai/gpt-oss-120b",
-  "groq/meta-llama/llama-4-maverick-17b-128e-instruct": "groq/meta-llama/llama-4-scout-17b-16e-instruct",
+  // Groq legacy aliases — the current free roster is gpt-oss-120b +
+  // gpt-oss-20b. Every Llama/Qwen/Kimi id migrates to gpt-oss-120b:
+  // Groq either retired them or they don't support the strict
+  // json_schema every generateObject call in this app depends on.
+  // Without these entries a saved selection just vanishes on load
+  // (safeModelIds drops unknown ids), leaving zero models selected and
+  // the Send button permanently disabled.
+  "groq/meta-llama/llama-4-scout-17b-16e-instruct": "groq/openai/gpt-oss-120b",
+  "groq/meta-llama/llama-4-maverick-17b-128e-instruct": "groq/openai/gpt-oss-120b",
   "groq/moonshotai/kimi-k2-instruct": "groq/openai/gpt-oss-120b",
-  "groq/llama-3.3-70b-versatile": "groq/meta-llama/llama-4-scout-17b-16e-instruct",
+  "groq/llama-3.3-70b-versatile": "groq/openai/gpt-oss-120b",
   "groq/llama-3.1-8b-instant": "groq/openai/gpt-oss-120b",
   "groq/qwen/qwen3-32b": "groq/openai/gpt-oss-120b",
+  "groq/qwen/qwen3.6-27b": "groq/openai/gpt-oss-120b",
   "xai/grok-4": "anthropic/claude-sonnet-4.6",
   "xai/grok-4-heavy": "anthropic/claude-sonnet-4.6",
   "xai/grok-4.3": "anthropic/claude-sonnet-4.6",

@@ -210,7 +210,7 @@ function friendlyExtractError(
     );
   }
 
-  // Groq free tier — Open GPT 120B and Llama 4 Scout. Both hit the same
+  // Groq free tier — Open GPT 120B and Open GPT 20B. Both hit the same
   // 14,400 req/day shared quota.
   const isGroqQuota =
     family === "groq" &&
@@ -220,11 +220,11 @@ function friendlyExtractError(
       lower.includes("429"));
   if (isGroqQuota) {
     return (
-      `${tag}💳 Law Agent에서 무료 모델(Open GPT 120B / Llama 4 Scout)의 일일 사용량을 초과했습니다.\n` +
+      `${tag}💳 Law Agent에서 무료 모델(Open GPT 120B / Open GPT 20B)의 일일 사용량을 초과했습니다.\n` +
       `Groq 무료 한도: 14,400회/일 — UTC 자정에 자동 초기화됩니다.\n` +
       `즉시 사용하시려면 Claude / Gemini / ChatGPT 중 하나를 선택해 주세요.\n` +
       `Groq 결제: https://console.groq.com/settings/billing\n\n` +
-      `💳 You've exhausted today's free quota on Groq (Open GPT 120B / Llama 4 Scout).\n` +
+      `💳 You've exhausted today's free quota on Groq (Open GPT 120B / Open GPT 20B).\n` +
       `Free limit is 14,400 req/day — auto-resets at UTC midnight.\n` +
       `For immediate use, pick Claude / Gemini / ChatGPT instead.\n` +
       `Groq billing: https://console.groq.com/settings/billing`
@@ -247,8 +247,46 @@ function friendlyExtractError(
     );
   }
 
+  // ── Invalid / expired / revoked API key ───────────────────────────
+  //
+  // Distinct from the "out of credit" cases above: the account may be
+  // perfectly funded, but the KEY itself no longer authenticates. Every
+  // provider words this differently, so match on the shared vocabulary.
+  // Without this branch the user just sees the raw provider string
+  // ("API key is invalid.") with no clue which key or where to fix it.
+  const keyEnvVar = directKeyEnvVar(family);
+  const isInvalidKey =
+    lower.includes("api key is invalid") ||
+    lower.includes("api key not valid") ||
+    lower.includes("incorrect api key") ||
+    lower.includes("invalid api key") ||
+    lower.includes("invalid_api_key") ||
+    lower.includes("authentication_error") ||
+    lower.includes("authentication failed") ||
+    lower.includes("unauthorized");
+  if (isInvalidKey) {
+    const providerLabel = providerDisplayName(family);
+    const consoleUrl = providerKeyConsoleUrl(family);
+    return (
+      `${tag}🔑 ${providerLabel} API 키가 유효하지 않습니다 (만료되었거나 취소된 키입니다).\n` +
+      `잔액 문제가 아니라 키 자체의 문제이므로, 새 키를 발급받아 교체해 주세요.\n` +
+      (consoleUrl ? `키 발급: ${consoleUrl}\n` : "") +
+      (keyEnvVar
+        ? `교체 위치: 로컬 \`.env.local\` 의 ${keyEnvVar}, 그리고 Vercel 프로젝트 환경 변수.\n`
+        : "") +
+      `무료 모델(Open GPT 120B)은 별도 키를 쓰므로 지금도 정상 작동합니다.\n\n` +
+      `🔑 Your ${providerLabel} API key is invalid (expired or revoked).\n` +
+      `This is not a billing problem — the key itself no longer authenticates, so issue a new one.\n` +
+      (consoleUrl ? `Get a key: ${consoleUrl}\n` : "") +
+      (keyEnvVar
+        ? `Replace it in \`.env.local\` (${keyEnvVar}) AND in your Vercel project env vars.\n`
+        : "") +
+      `The free model (Open GPT 120B) uses a separate key and still works right now.`
+    );
+  }
+
   // ── Vercel AI Gateway insufficient funds (generic) ────────────────
-  const envVar = directKeyEnvVar(family);
+  const envVar = keyEnvVar;
   if (
     lower.includes("insufficient funds") ||
     lower.includes("insufficient_funds")
@@ -299,8 +337,46 @@ function directKeyEnvVar(family: string | undefined): string | undefined {
       return "OPENAI_API_KEY";
     case "google":
       return "GOOGLE_GENERATIVE_AI_API_KEY";
+    case "groq":
+      return "GROQ_API_KEY";
     case "manus":
       return "MANUS_API_KEY";
+    default:
+      return undefined;
+  }
+}
+
+/** User-recognizable brand name for a family — matches FAMILY_LABELS. */
+function providerDisplayName(family: string | undefined): string {
+  switch (family) {
+    case "anthropic":
+      return "Claude (Anthropic)";
+    case "openai":
+      return "ChatGPT (OpenAI)";
+    case "google":
+      return "Gemini (Google AI Studio)";
+    case "groq":
+      return "Groq";
+    case "manus":
+      return "Manus";
+    default:
+      return "AI 제공자 / provider";
+  }
+}
+
+/** Where the user goes to mint a replacement key for this family. */
+function providerKeyConsoleUrl(family: string | undefined): string | undefined {
+  switch (family) {
+    case "anthropic":
+      return "https://console.anthropic.com/settings/keys";
+    case "openai":
+      return "https://platform.openai.com/api-keys";
+    case "google":
+      return "https://aistudio.google.com/apikey";
+    case "groq":
+      return "https://console.groq.com/keys";
+    case "manus":
+      return "https://manus.im/settings/api";
     default:
       return undefined;
   }

@@ -1,0 +1,37 @@
+# Caddy — TLS termination for the firm server.
+# Only used when started with:  docker compose --profile proxy up -d
+#
+# Replace law-agent.internal with the hostname your IT team assigns in
+# internal DNS.
+#
+# For a PUBLIC hostname, Caddy provisions a Let's Encrypt certificate
+# automatically — just use the real domain and remove the tls line below.
+#
+# For an INTERNAL-only hostname (the common case for a firm intranet),
+# Let's Encrypt cannot validate it, so use one of:
+#   (a) tls internal            — Caddy's own local CA; browsers will warn
+#                                 unless IT installs the root cert
+#   (b) tls /path/cert /path/key — your firm's existing internal certificate
+
+law-agent.internal {
+	# (a) Caddy's internal CA. Swap for option (b) if IT issues certs.
+	tls internal
+
+	encode gzip zstd
+
+	reverse_proxy app:3000 {
+		# Uploads (scanned PDFs) and Manus agent runs can be slow — Manus
+		# tasks legitimately take minutes. Don't cut them off.
+		transport http {
+			read_timeout 900s
+			write_timeout 900s
+		}
+	}
+
+	log {
+		output file /data/access.log {
+			roll_size 10MiB
+			roll_keep 10
+		}
+	}
+}

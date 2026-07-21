@@ -1,4 +1,4 @@
-import { loadCorpus } from "./retrieval";
+import { loadCorpusCaseNumbers } from "./db";
 
 /**
  * Process-lifetime cache for verification results. Keyed by caseNumber.
@@ -11,7 +11,13 @@ const verificationCache = new Map<string, boolean>();
 let corpusCaseNumbersPromise: Promise<Set<string>> | null = null;
 async function getCorpusCaseNumbers(): Promise<Set<string>> {
   if (!corpusCaseNumbersPromise) {
-    corpusCaseNumbersPromise = loadCorpus().then((c) => new Set(c.map((p) => p.caseNumber)));
+    // Don't cache a rejection: if the DB is briefly unavailable we'd
+    // otherwise treat every later verification as "not in corpus" for the
+    // life of the process.
+    corpusCaseNumbersPromise = loadCorpusCaseNumbers().catch((err: unknown) => {
+      corpusCaseNumbersPromise = null;
+      throw err;
+    });
   }
   return corpusCaseNumbersPromise;
 }
